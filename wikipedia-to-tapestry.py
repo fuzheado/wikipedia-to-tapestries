@@ -409,6 +409,7 @@ def convert_wikipedia_to_tapestry(
                 ls = fetch_page_summary(lang, lt)
                 # Skip disambiguation pages
                 if ls.get("type") == "disambiguation":
+                    print(f"     ℹ️  Skipping '{lt}' (disambiguation page)")
                     continue
                 linked_info.append({
                     "title": ls.get("title", lt),
