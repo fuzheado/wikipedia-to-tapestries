@@ -461,29 +461,45 @@ def convert_wikipedia_to_tapestry(
     x_main = MARGIN
     y_cursor = MARGIN
 
-    # ── Image gallery (top, compact grid) ──
-    # Arrange images in rows at TILE_HEIGHT height, wrapping at max_row_width
+    # ── Image gallery (top, center-aligned rows) ──
+    # Measure widths, group into centered rows, then place
     img_ids = []
     if image_urls:
-        max_row_width = max(MAIN_WIDTH + MARGIN, 1200)
-        row_x = MARGIN
-        row_y = y_cursor
-        for img_name, img_url, ow, oh in image_urls:
-            display_name = img_name[:40] if img_name != "Thumbnail" else ""
-            iid = builder.add_image_item(
-                row_x, row_y, img_url, title=display_name,
-                fixed_height=TILE_HEIGHT, orig_w=ow, orig_h=oh
-            )
-            img_ids.append(iid)
-            img_w = builder.root["items"][-1]["size"]["width"]
-            if row_x > MARGIN and row_x + img_w > MARGIN + max_row_width:
-                row_y += TILE_HEIGHT + 6
-                row_x = MARGIN
-            builder.root["items"][-1]["position"]["x"] = row_x
-            builder.root["items"][-1]["position"]["y"] = row_y
-            row_x += img_w + 6
+        # Calculate display width for each image using API dimensions
+        def calc_disp_w(ow, oh):
+            req_w = max(TILE_HEIGHT * 4, 800)
+            tw = min(req_w, ow)
+            th = int(oh * (tw / ow))
+            return max(int(tw * (TILE_HEIGHT / th)), 60)
 
-        y_cursor = row_y + TILE_HEIGHT + MARGIN * 2
+        widths = [calc_disp_w(ow, oh) for _, _, ow, oh in image_urls]
+        max_row_w = max(MAIN_WIDTH + MARGIN, 1200)
+        gap = 6
+
+        # Group into rows
+        rows = [[]]
+        for i, w in enumerate(widths):
+            if sum(item[1] + gap for item in rows[-1]) + w > max_row_w and rows[-1]:
+                rows.append([])
+            rows[-1].append((i, w))
+
+        # Place each row, centered under the main article
+        row_y = y_cursor
+        for row in rows:
+            row_w = sum(w + gap for _, w in row) - gap
+            row_x = max(MARGIN, MARGIN + (MAIN_WIDTH - row_w) // 2)
+            for idx, w in row:
+                img_name, img_url, ow, oh = image_urls[idx]
+                display_name = img_name[:40] if img_name != "Thumbnail" else ""
+                iid = builder.add_image_item(
+                    row_x, row_y, img_url, title=display_name,
+                    fixed_height=TILE_HEIGHT, orig_w=ow, orig_h=oh
+                )
+                img_ids.append(iid)
+                row_x += w + gap
+            row_y += TILE_HEIGHT + gap
+
+        y_cursor = row_y + MARGIN * 2
 
     # ── Main article (webpage embed) ──
     title_item_id = builder.add_webpage_item(
