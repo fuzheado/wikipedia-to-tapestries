@@ -499,10 +499,6 @@ def convert_wikipedia_to_tapestry(
         if layout == "semicircle":
             n = len(linked_info)
             radius = max(LINK_WIDTH * 1.5, min(n * (LINK_WIDTH + COL_GAP) / math.pi, LINK_WIDTH * 2.5))
-            # Shift arc right so items stay in positive x territory
-            leftmost = cx + radius * math.cos((n - 1) * math.pi / (n - 1) if n > 1 else 0) - LINK_WIDTH // 2
-            if leftmost < MARGIN:
-                cx += MARGIN - leftmost
             for i, info in enumerate(linked_info):
                 angle = i * math.pi / (n - 1) if n > 1 else math.pi / 2
                 lx = cx + radius * math.cos(angle) - LINK_WIDTH // 2
