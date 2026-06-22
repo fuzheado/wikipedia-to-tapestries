@@ -487,11 +487,6 @@ def convert_wikipedia_to_tapestry(
         thumb_url=lead_image_url or "",
         use_screenshot=use_screenshots
     )
-    # Set start view to frame the main article
-    builder.root["startView"] = {
-        "position": {"x": x_main - 20, "y": y_cursor - 20},
-        "size": {"width": MAIN_WIDTH + 40, "height": MAIN_HEIGHT + 40},
-    }
     y_cursor += MAIN_HEIGHT + MARGIN
 
     # ── Linked articles (below the main article, 2-column grid) ──
@@ -528,6 +523,20 @@ def convert_wikipedia_to_tapestry(
             "type": "item",
             "itemId": item_id,
         })
+
+    # ── Dynamic start view (zoom out to fit all items) ──
+    if builder.root["items"]:
+        xs = [i["position"]["x"] for i in builder.root["items"]]
+        ys = [i["position"]["y"] for i in builder.root["items"]]
+        ws = [i["position"]["x"] + i["size"]["width"] for i in builder.root["items"]]
+        hs = [i["position"]["y"] + i["size"]["height"] for i in builder.root["items"]]
+        min_x, max_x = min(xs), max(ws)
+        min_y, max_y = min(ys), max(hs)
+        pad = 60
+        builder.root["startView"] = {
+            "position": {"x": min_x - pad, "y": min_y - pad},
+            "size": {"width": max_x - min_x + pad * 2, "height": max_y - min_y + pad * 2},
+        }
 
     # ── Output path ──
     if output is None:
