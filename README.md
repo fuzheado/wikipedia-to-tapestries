@@ -63,6 +63,15 @@ playwright-cli install
 
 Screenshots make the file ~3× larger but give a much better preview of each page.
 
+### Gallery image sizing
+
+Gallery images are **not downloaded** for the zip. Their Commons URLs are used
+directly as item `source`, keeping the file small. Dimensions are fetched from the
+Wikimedia API (`iiprop=size`) in a single lightweight call per image — no image
+data is transferred during sizing. Each image is displayed at the specified
+`--gallery-height` (default 160px) with proportional width matching its real
+aspect ratio, preventing distortion.
+
 ## Output Layout
 
 ```
