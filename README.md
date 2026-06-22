@@ -72,6 +72,12 @@ data is transferred during sizing. Each image is displayed at the specified
 `--gallery-height` (default 160px) with proportional width matching its real
 aspect ratio, preventing distortion.
 
+> **Image discovery quirk:** The converter uses `action=parse&prop=images` to
+> discover images, which processes the fully-rendered page and finds ~2× more
+> images than `prop=images` (which only catches direct wikitext transclusions).
+> This matters for articles with complex templates, infoboxes, or photo galleries.
+> Example: Stockholm returned 8 images with `prop=images` vs 36 with `parse+images`.
+
 ## Output Layout
 
 ```
