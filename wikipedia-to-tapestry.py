@@ -468,6 +468,7 @@ def convert_wikipedia_to_tapestry(
     if image_urls:
         max_row_w = max(MAIN_WIDTH + MARGIN, 1200)
         gap = 6
+        row_gap = 32  # vertical gap between rows, room for title text
 
         # Pass 1: create all items at (0, y), tracking row breaks by width
         row_indices = [[]]  # list of rows, each a list of item indices
@@ -499,7 +500,7 @@ def convert_wikipedia_to_tapestry(
                 item_list[i]["position"]["x"] = row_x
                 item_list[i]["position"]["y"] = row_y
                 row_x += item_list[i]["size"]["width"] + gap
-            row_y += gallery_height + gap
+            row_y += gallery_height + row_gap
 
         y_cursor = row_y + MARGIN * 2
 
