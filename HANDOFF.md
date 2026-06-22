@@ -22,7 +22,8 @@ screenshot thumbnails.
 └── .gitignore                  # *.zip, playwright cache
 ```
 
-The companion skill lives at `~/.pi/agent/skills/tapestries/` with the full v7
+The companion skill ([github.com/fuzheado/tapestries-skill](https://github.com/fuzheado/tapestries-skill))
+contains the full v7 format specification, validator, and test files.
 format specification, validator, and test files.
 
 ## Architecture
@@ -151,4 +152,5 @@ requests. User-Agent must include "bot" identifier.
 Developed in June 2026 through reverse-engineering the Tapestry v7 export format
 by comparing production `.zip` files exported from `tapestries.media` against
 converter output. The full format specification is documented in the companion
-Tapestry skill at `~/.pi/agent/skills/tapestries/`.
+Tapestry format skill at
+[github.com/fuzheado/tapestries-skill](https://github.com/fuzheado/tapestries-skill).

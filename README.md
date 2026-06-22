@@ -124,9 +124,12 @@ producing a cleaner embed without sidebars, collapsed ToC, or desktop chrome.
 ## File Format
 
 The output conforms to the **v7 Tapestry export format** as deployed on
-`tapestries.media`. The full format specification and validator live at:
+`tapestries.media`. The full format specification, validator, and test files
+are available at:
 
-**`~/.pi/agent/skills/tapestries/`** (Tapestry skill)
+**https://github.com/fuzheado/tapestries-skill**
+
+Locally at `~/.pi/agent/skills/tapestries/` if installed.
 
 Key rules enforced by the converter:
 - `version: 7` with `parentId`, `presentation`, `startView`, `thumbnail` at root
@@ -164,6 +167,8 @@ contact. Requests are rate-limited with 300ms delays between image downloads.
 ## Credits
 
 Built by reverse-engineering the Tapestry v7 export format from production
-`.zip` files downloaded from `tapestries.media`. The Tapestry Project is
-open source at [github.com/internetarchive/tapestry-project](https://github.com/internetarchive/tapestry-project).
-The full Tapestry format skill lives at `~/.pi/agent/skills/tapestries/`.
+`.zip` files downloaded from `tapestries.media`.
+The Tapestry Project is open source at
+[github.com/internetarchive/tapestry-project](https://github.com/internetarchive/tapestry-project).
+The Tapestry format skill is at
+[github.com/fuzheado/tapestries-skill](https://github.com/fuzheado/tapestries-skill).
