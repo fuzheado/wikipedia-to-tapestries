@@ -127,6 +127,27 @@ def get_image_thumb_url(filename: str, width=400) -> str | None:
     return None
 
 
+def get_image_info(filename: str, req_width: int = 800):
+    """Get thumbnail URL + original dimensions from the API (no file download).
+    Returns (thumb_url, orig_width, orig_height) or (None, None, None) on failure."""
+    data = wiki_request("https://en.wikipedia.org/w/api.php", {
+        "action": "query",
+        "titles": filename,
+        "prop": "imageinfo",
+        "iiprop": "url|size",
+        "iiurlwidth": req_width,
+        "format": "json",
+    })
+    for pdata in data.get("query", {}).get("pages", {}).values():
+        info = pdata.get("imageinfo", [])
+        if info:
+            thumb_url = info[0].get("thumburl") or info[0].get("url")
+            ow = info[0].get("width", req_width)
+            oh = info[0].get("height", req_width)
+            return (thumb_url, ow, oh)
+    return (None, None, None)
+
+
 def download_image(url: str, filepath: str) -> bytes | None:
     """Download image bytes, return None on failure. Includes delay for rate limiting."""
     time.sleep(0.3)
@@ -286,19 +307,20 @@ class TapestryBuilder:
         return item_id
 
     def add_image_item(self, x: int, y: int, source_url: str,
-                       title: str = "", fixed_height: int = TILE_HEIGHT) -> str:
-        """Add an image item. Downloads to measure aspect ratio, keeps URL as source."""
+                       title: str = "", fixed_height: int = TILE_HEIGHT,
+                       orig_w: int = 0, orig_h: int = 0) -> str:
+        """Add an image item. Uses API-provided dimensions, no download needed."""
         item_id = make_id()
         disp_w = disp_h = fixed_height
-        # Download once to measure, then discard — we keep the URL for display
-        img_data = download_image(source_url, f"measure_{item_id}")
-        if img_data:
-            dims = image_dimensions(img_data)
-            if dims:
-                iw, ih = dims
-                ratio = fixed_height / ih
-                disp_w = max(int(iw * ratio), 60)
-                disp_h = fixed_height
+        if orig_w > 0 and orig_h > 0:
+            # Calculate what the thumbnail dimensions will be at the requested width
+            req_w = max(fixed_height * 4, 800)
+            thumb_w = min(req_w, orig_w)
+            thumb_h = int(orig_h * (thumb_w / orig_w))
+            # Scale to target display height
+            scale = fixed_height / thumb_h
+            disp_w = max(int(thumb_w * scale), 60)
+            disp_h = fixed_height
         self.root["items"].append({
             "id": item_id,
             "type": "image",
@@ -407,16 +429,23 @@ def convert_wikipedia_to_tapestry(
     image_filenames = all_images[:max_gallery]
     print(f"   Images:      {len(image_filenames)} (showing up to {max_gallery})")
 
-    # Get thumbnail URLs for each image
-    image_urls = []
+    # Get thumbnail URLs + dimensions for each image (single API call per image, no download)
+    image_urls = []  # (display_name, thumb_url, orig_width, orig_height)
     for fname in image_filenames:
-        url = get_image_thumb_url(fname, width=max(gallery_height * 4, 800))
-        if url:
+        req_w = max(gallery_height * 4, 800)
+        url, ow, oh = get_image_info(fname, req_width=req_w)
+        if url and ow and oh:
             display = re.sub(r"^File:", "", fname)
-            image_urls.append((display, url))
+            image_urls.append((display, url, ow, oh))
 
     if lead_image_url:
-        image_urls.insert(0, ("Thumbnail", lead_image_url))
+        # Skip — lead image is already used as the root thumbnail
+        pass
+
+    image_urls = image_urls[:max_gallery]
+
+    if lead_image_url:
+        pass  # lead image is already the root thumbnail, skip gallery
 
     image_urls = image_urls[:max_gallery]
 
@@ -434,12 +463,11 @@ def convert_wikipedia_to_tapestry(
         max_row_width = max(MAIN_WIDTH + MARGIN, 1200)
         row_x = MARGIN
         row_y = y_cursor
-        for img_name, img_url in image_urls:
+        for img_name, img_url, ow, oh in image_urls:
             display_name = img_name[:40] if img_name != "Thumbnail" else ""
-            # Peek at the image first to see how wide it would be
             iid = builder.add_image_item(
                 row_x, row_y, img_url, title=display_name,
-                fixed_height=TILE_HEIGHT
+                fixed_height=TILE_HEIGHT, orig_w=ow, orig_h=oh
             )
             img_ids.append(iid)
             img_w = builder.root["items"][-1]["size"]["width"]
