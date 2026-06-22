@@ -407,6 +407,9 @@ def convert_wikipedia_to_tapestry(
         for lt in link_titles:
             try:
                 ls = fetch_page_summary(lang, lt)
+                # Skip disambiguation pages
+                if ls.get("type") == "disambiguation":
+                    continue
                 linked_info.append({
                     "title": ls.get("title", lt),
                     "url": f"https://{lang}.wikipedia.org/wiki/{quote(lt, safe='')}?useformat=mobile",
