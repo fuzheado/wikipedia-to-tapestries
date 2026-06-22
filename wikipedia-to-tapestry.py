@@ -14,6 +14,7 @@ import argparse
 import html
 import io
 import json
+import math
 import os
 import re
 import sys
@@ -377,6 +378,7 @@ def convert_wikipedia_to_tapestry(
     gallery_height: int = 160,
     output: str | None = None,
     use_screenshots: bool = False,
+    layout: str = "grid",
 ):
     """Convert a Wikipedia article into a visual-map tapestry."""
 
@@ -489,26 +491,47 @@ def convert_wikipedia_to_tapestry(
     )
     y_cursor += MAIN_HEIGHT + MARGIN
 
-    # ── Linked articles (below the main article, 2-column grid) ──
+    # ── Linked articles (below the main article) ──
     link_ids = []
     if linked_info:
-        link_cols = 2
-        total_row_w = link_cols * LINK_WIDTH + (link_cols - 1) * COL_GAP
-        x_start = max(MARGIN, x_main + (MAIN_WIDTH - total_row_w) // 2)
+        cx = x_main + MAIN_WIDTH // 2
 
-        for i, info in enumerate(linked_info):
-            col = i % link_cols
-            row = i // link_cols
-            lx = x_start + col * (LINK_WIDTH + COL_GAP)
-            ly = y_cursor + row * (LINK_HEIGHT + MARGIN)
-            lid = builder.add_webpage_item(
-                lx, ly, LINK_WIDTH, LINK_HEIGHT,
-                info["url"], title=info["title"],
-                thumb_url=info.get("thumbnail") or "",
-                use_screenshot=use_screenshots
-            )
-            link_ids.append(lid)
-            builder.add_rel(title_item_id, lid, color="#36c", weight="light")
+        if layout == "semicircle":
+            n = len(linked_info)
+            radius = max(LINK_WIDTH * 1.5, min(n * (LINK_WIDTH + COL_GAP) / math.pi, LINK_WIDTH * 2.5))
+            # Shift arc right so items stay in positive x territory
+            leftmost = cx + radius * math.cos((n - 1) * math.pi / (n - 1) if n > 1 else 0) - LINK_WIDTH // 2
+            if leftmost < MARGIN:
+                cx += MARGIN - leftmost
+            for i, info in enumerate(linked_info):
+                angle = i * math.pi / (n - 1) if n > 1 else math.pi / 2
+                lx = cx + radius * math.cos(angle) - LINK_WIDTH // 2
+                ly = y_cursor + radius * math.sin(angle)
+                lid = builder.add_webpage_item(
+                    lx, ly, LINK_WIDTH, LINK_HEIGHT,
+                    info["url"], title=info["title"],
+                    thumb_url=info.get("thumbnail") or "",
+                    use_screenshot=use_screenshots
+                )
+                link_ids.append(lid)
+                builder.add_rel(title_item_id, lid, color="#36c", weight="light")
+        else:
+            link_cols = 2
+            total_row_w = link_cols * LINK_WIDTH + (link_cols - 1) * COL_GAP
+            x_start = max(MARGIN, cx - total_row_w // 2)
+            for i, info in enumerate(linked_info):
+                col = i % link_cols
+                row = i // link_cols
+                lx = x_start + col * (LINK_WIDTH + COL_GAP)
+                ly = y_cursor + row * (LINK_HEIGHT + MARGIN)
+                lid = builder.add_webpage_item(
+                    lx, ly, LINK_WIDTH, LINK_HEIGHT,
+                    info["url"], title=info["title"],
+                    thumb_url=info.get("thumbnail") or "",
+                    use_screenshot=use_screenshots
+                )
+                link_ids.append(lid)
+                builder.add_rel(title_item_id, lid, color="#36c", weight="light")
 
     # ── Presentation order (guided tour) ──
     # Main article → Link 1 → Link 2 → ... → First gallery image
@@ -572,6 +595,8 @@ def main():
     parser.add_argument("--output", "-o", help="Output .zip file path")
     parser.add_argument("--screenshots", action="store_true",
                         help="Use Playwright browser screenshots as webpage thumbnails (slower)")
+    parser.add_argument("--layout", choices=["grid", "semicircle"], default="grid",
+                        help="Layout of linked articles: grid (default) or semicircle")
 
     args = parser.parse_args()
 
@@ -599,6 +624,7 @@ def main():
         gallery_height=args.gallery_height,
         output=args.output,
         use_screenshots=args.screenshots,
+        layout=args.layout,
     )
 
 
