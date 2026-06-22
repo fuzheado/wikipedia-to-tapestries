@@ -1,0 +1,4 @@
+*.zip
+.playwright-cli/
+__pycache__/
+*.pyc

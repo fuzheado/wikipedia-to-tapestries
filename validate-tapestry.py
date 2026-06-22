@@ -1,0 +1,1 @@
+/Users/alih/.pi/agent/skills/tapestries/scripts/validate-tapestry.py

@@ -1,0 +1,5 @@
+# Python dependencies for wikipedia-to-tapestry.py
+# Playwright CLI (@playwright/cli) is also needed for --screenshots:
+#   npm install -g @playwright/cli@latest
+#   playwright-cli install
+requests>=2.28
