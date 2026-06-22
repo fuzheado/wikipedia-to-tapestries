@@ -286,22 +286,19 @@ class TapestryBuilder:
         return item_id
 
     def add_image_item(self, x: int, y: int, source_url: str,
-                       title: str = "", fixed_height: int = TILE_HEIGHT) -> str | None:
-        """Add an image item from a URL (not downloaded). Size estimated from thumbnail URL."""
+                       title: str = "", fixed_height: int = TILE_HEIGHT) -> str:
+        """Add an image item. Downloads to measure aspect ratio, keeps URL as source."""
         item_id = make_id()
-        # Estimate dimensions from thumbnail URL — Wikipedia thumbnails include pixel size
-        disp_w = fixed_height
-        disp_h = fixed_height
-        px_match = re.search(r"/(\d+)px-", source_url)
-        if px_match:
-            thumb_w = int(px_match.group(1))
-            # Assume roughly 4:3 aspect ratio for thumbnails
-            disp_w = min(thumb_w, fixed_height * 2)
-            disp_h = int(disp_w * 0.75)
-            # Keep within bounds
-            disp_w = max(disp_w, 60)
-            disp_h = max(disp_h, 60)
-
+        disp_w = disp_h = fixed_height
+        # Download once to measure, then discard — we keep the URL for display
+        img_data = download_image(source_url, f"measure_{item_id}")
+        if img_data:
+            dims = image_dimensions(img_data)
+            if dims:
+                iw, ih = dims
+                ratio = fixed_height / ih
+                disp_w = max(int(iw * ratio), 60)
+                disp_h = fixed_height
         self.root["items"].append({
             "id": item_id,
             "type": "image",
