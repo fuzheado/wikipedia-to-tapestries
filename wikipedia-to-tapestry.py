@@ -483,11 +483,12 @@ def convert_wikipedia_to_tapestry(
                 rows.append([])
             rows[-1].append((i, w))
 
-        # Place each row, centered under the main article
+        # Place each row, all centered on the main article's centerline
+        cx = x_main + MAIN_WIDTH // 2
         row_y = y_cursor
         for row in rows:
             row_w = sum(w + gap for _, w in row) - gap
-            row_x = max(MARGIN, MARGIN + (MAIN_WIDTH - row_w) // 2)
+            row_x = max(MARGIN, cx - row_w // 2)
             for idx, w in row:
                 img_name, img_url, ow, oh = image_urls[idx]
                 display_name = img_name[:40] if img_name != "Thumbnail" else ""
