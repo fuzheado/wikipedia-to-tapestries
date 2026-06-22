@@ -91,24 +91,18 @@ def fetch_lead_links(lang: str, title: str) -> list[dict]:
     return [l for l in links if l.get("ns") == 0 and "*" in l]
 
 
-def fetch_all_images(lang: str, title: str, limit=50) -> list[str]:
-    """Get image filenames used on the page."""
+def fetch_all_images(lang: str, title: str, limit=100) -> list[str]:
+    """Get image filenames used on the page. Uses parse+images for better coverage."""
     url = ACTION_API.format(lang=lang)
     data = wiki_request(url, {
-        "action": "query",
+        "action": "parse",
+        "page": title,
         "prop": "images",
-        "titles": title,
-        "imlimit": limit,
         "format": "json",
     })
-    images = []
-    for pdata in data.get("query", {}).get("pages", {}).values():
-        for img in pdata.get("images", []):
-            filename = img["title"]
-            # Only raster images for gallery
-            if re.search(r"\.(jpg|jpeg|png|gif|webp)$", filename, re.I):
-                images.append(filename)
-    return images
+    images = data.get("parse", {}).get("images", [])
+    # Filter to raster images only
+    return [f for f in images if re.search(r"\.(jpg|jpeg|png|gif|webp)$", f, re.I)]
 
 
 def get_image_thumb_url(filename: str, width=400) -> str | None:
@@ -440,7 +434,7 @@ def convert_wikipedia_to_tapestry(
     image_urls = []  # (display_name, thumb_url, orig_width, orig_height)
     for fname in image_filenames:
         req_w = max(gallery_height * 4, 800)
-        url, ow, oh = get_image_info(fname, req_width=req_w)
+        url, ow, oh = get_image_info(f"File:{fname}" if not fname.startswith("File:") else fname, req_width=req_w)
         if url and ow and oh:
             display = re.sub(r"^File:", "", fname)
             image_urls.append((display, url, ow, oh))
