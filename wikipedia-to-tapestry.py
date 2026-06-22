@@ -379,6 +379,7 @@ def convert_wikipedia_to_tapestry(
     output: str | None = None,
     use_screenshots: bool = False,
     layout: str = "grid",
+    packed: bool = False,
 ):
     """Convert a Wikipedia article into a visual-map tapestry."""
 
@@ -468,13 +469,13 @@ def convert_wikipedia_to_tapestry(
     if image_urls:
         max_row_w = max(MAIN_WIDTH + MARGIN, 1200)
         gap = 6
-        row_gap = 32  # vertical gap between rows, room for title text
+        row_gap = 12 if packed else 32  # tighter spacing when packed (no titles)
 
         # Pass 1: create all items at (0, y), tracking row breaks by width
-        row_indices = [[]]  # list of rows, each a list of item indices
+        row_indices = [[]]
         row_x = 0
         for idx, (img_name, img_url, ow, oh) in enumerate(image_urls):
-            display_name = img_name[:40] if img_name != "Thumbnail" else ""
+            display_name = "" if packed else (img_name[:40] if img_name != "Thumbnail" else "")
             iid = builder.add_image_item(
                 0, 0, img_url, title=display_name,
                 fixed_height=gallery_height, orig_w=ow, orig_h=oh
@@ -615,6 +616,8 @@ def main():
                         help="Use Playwright browser screenshots as webpage thumbnails (slower)")
     parser.add_argument("--layout", choices=["grid", "semicircle"], default="grid",
                         help="Layout of linked articles: grid (default) or semicircle")
+    parser.add_argument("--packed", action="store_true",
+                        help="Gallery: hide filenames, tighter spacing")
 
     args = parser.parse_args()
 
@@ -643,6 +646,7 @@ def main():
         output=args.output,
         use_screenshots=args.screenshots,
         layout=args.layout,
+        packed=args.packed,
     )
 
 
