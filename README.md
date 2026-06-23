@@ -121,6 +121,113 @@ The `startView` is calculated dynamically from the bounding box of all items.
 Webpage URLs use `?useformat=mobile` to activate the mobile stylesheet,
 producing a cleaner embed without sidebars, collapsed ToC, or desktop chrome.
 
+---
+
+## Wikipedia → Image Slideshow
+
+A companion script that turns **all useful images** from a Wikipedia article into a
+navigable photo mosaic on the infinite canvas — like a visual narrative overview
+of the article.
+
+```bash
+python3 wikipedia-images-to-tapestry.py "Article" [options]
+python3 wikipedia-images-to-tapestry.py "https://en.wikipedia.org/wiki/Article"
+```
+
+### Quick Start
+
+```bash
+python3 wikipedia-images-to-tapestry.py "Great Barrier Reef" -o reef_slideshow.zip
+python3 validate-tapestry.py reef_slideshow.zip
+# Drag reef_slideshow.zip onto https://tapestries.media
+```
+
+### Options
+
+| Flag | Default | Description |
+|---|---|---|
+| `--max-images N` | 50 | Max images to include |
+| `--image-width N` | 600 | Display width of each image in pixels |
+| `--lang LANG` | `en` | Wikipedia language code |
+| `--output`, `-o` | auto | Output `.zip` file path |
+
+### What It Produces
+
+Each useful image becomes a **slide** on the canvas with three items bundled
+into a group:
+
+```
+┌──────────────────────────┐
+│      Image (600px)       │
+├──────────────────────────┤
+│  Caption text            │
+│  (SDC label + Commons    │
+│   description + artist)  │
+├──────────────────────────┤
+│ 🌐 View on Commons  │  ← clickable button
+└──────────────────────────┘
+```
+
+**Layout:** Images are arranged in a center-aligned grid with roughly equal
+rows and columns (`round(sqrt(N))`). For 49 images you get 7×7; for 25 you get 5×5.
+This produces a roughly square/round shape on the canvas, with ragged left/right
+edges since each row is centered independently.
+
+**Groups for presentation focus:** Each image, its caption text, and its Commons
+link button share a single `groupId`. The presentation tour targets the group
+(rather than the individual image), which tells Tapestries to zoom the viewport
+wide enough to show the image **and** its caption text together — so you see the
+full slide, not just a tightly-cropped image.
+
+**Navigation:** The presentation steps walk through groups (slide → slide → …).
+There are no visual arrows; the presentation's built-in next/prev controls
+handle the flow. Clicking the blue "View on Wikimedia Commons" button opens the
+file's Commons page in a new tab.
+
+### Commons Metadata
+
+Images are enriched with data from **two** Commons API calls (cached to disk):
+
+| Source | What it provides |
+|---|---|
+| `prop=imageinfo&iiprop=extmetadata` | `ImageDescription`, `Artist`, `DateTimeOriginal`, `ObjectName` (from the file's Information template) |
+| `wbgetentities` (SDC) | Multilingual structured caption (the file's label on Commons) |
+
+The caption HTML combines the SDC label (bold heading), the Commons description
+(body), and the artist/date (gray attribution line).
+
+### Image Filtering
+
+Uses the same `is_useful_image()` filter as the visual map converter — skips
+icons, logos, lock symbols, UI badges, flags, and Wikimedia project logos.
+
+### Disk Cache
+
+Image metadata is cached to `~/.cache/tapestry-converter/<Article>_<lang>.json`.
+Re-running the same article loads from cache instantly (shown with a 💾 indicator).
+Clear the cache directory to force a fresh fetch.
+
+### No Image Downloads
+
+Like the visual map converter, images use their Commons thumbnail URLs directly
+as item `source`. The zip stays small (~15-20 KB for 50 images) — no image data
+is embedded.
+
+### Examples
+
+```bash
+# 49 images, 7×7 grid
+python3 wikipedia-images-to-tapestry.py "Philadelphia"
+
+# 50 images, 7×7+1 grid, larger display
+python3 wikipedia-images-to-tapestry.py "Elephant" --image-width 700
+
+# Custom output name
+python3 wikipedia-images-to-tapestry.py "https://en.wikipedia.org/wiki/Coral_reef" -o coral_reef_slideshow.zip
+```
+
+---
+
 ## File Format
 
 The output conforms to the **v7 Tapestry export format** as deployed on
