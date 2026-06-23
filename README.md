@@ -140,6 +140,9 @@ python3 wikipedia-images-to-tapestry.py "https://en.wikipedia.org/wiki/Article"
 python3 wikipedia-images-to-tapestry.py "Great Barrier Reef" -o reef_slideshow.zip
 python3 validate-tapestry.py reef_slideshow.zip
 # Drag reef_slideshow.zip onto https://tapestries.media
+
+# Full thumbnails of pages and nice arrangement
+python3 wikipedia-to-tapestry.py "2024 Sundance Film Festival" --layout semicircle --screenshots --max-links 8 --max-gallery 40 --gallery-height 150
 ```
 
 ### Options
@@ -275,7 +278,9 @@ contact. Requests are rate-limited with 300ms delays between image downloads.
 
 Built by reverse-engineering the Tapestry v7 export format from production
 `.zip` files downloaded from `tapestries.media`.
-The Tapestry Project is open source at
-[github.com/internetarchive/tapestry-project](https://github.com/internetarchive/tapestry-project).
+The Tapestry Project is open source — the active development fork is at
+[github.com/asteasolutions/tapestry-project](https://github.com/asteasolutions/tapestry-project)
+(the original [Internet Archive mirror](https://github.com/internetarchive/tapestry-project)
+contains schemas up to v6 only).
 The Tapestry format skill is at
 [github.com/fuzheado/tapestries-skill](https://github.com/fuzheado/tapestries-skill).
