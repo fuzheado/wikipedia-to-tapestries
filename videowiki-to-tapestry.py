@@ -19,6 +19,7 @@ Examples:
 """
 
 import argparse
+import asyncio
 import html
 import io
 import json
@@ -26,12 +27,20 @@ import math
 import os
 import re
 import sys
+import tempfile
 import time
 import uuid
 import zipfile
 from urllib.parse import quote, unquote
 
 import requests
+
+try:
+    import edge_tts
+    HAS_TTS = True
+except ImportError:
+    HAS_TTS = False
+    print("⚠️  edge_tts not installed. Run: pip install edge-tts", file=sys.stderr)
 
 # ── Configuration ──────────────────────────────────────────────────────────
 
@@ -51,6 +60,11 @@ GAP_TEXT = 8
 GAP_ROW = 30
 BTN_HEIGHT = 36
 BTN_GAP = 6
+AUDIO_HEIGHT = 60   # height of the TTS audio player bar
+AUDIO_GAP = 6       # gap between Commons button and audio player
+
+# Text-to-speech defaults
+TTS_VOICE = "en-US-JennyNeural"  # Microsoft neural voice
 
 # ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -320,6 +334,25 @@ def format_narration_html(title: str, narration: str) -> str:
     return f"<strong>{safe_title}</strong><br><br>{safe_narration}"
 
 
+# ── Text-to-Speech ────────────────────────────────────────────────────────
+
+def generate_narration_audio(text: str, voice: str = TTS_VOICE) -> bytes | None:
+    """Generate TTS audio bytes for the narration text using edge-tts.
+    Returns MP3 bytes, or None if generation fails."""
+    if not HAS_TTS or not text.strip():
+        return None
+    try:
+        path = os.path.join(tempfile.gettempdir(), f"vw_tts_{uuid.uuid4().hex}.mp3")
+        asyncio.run(edge_tts.Communicate(text[:500], voice).save(path))
+        with open(path, "rb") as f:
+            data = f.read()
+        os.remove(path)
+        return data
+    except Exception as e:
+        print(f"  ⚠️  TTS failed: {e}", file=sys.stderr)
+        return None
+
+
 # ── Main conversion ───────────────────────────────────────────────────────
 
 def convert_videowiki_to_tapestry(
@@ -327,6 +360,8 @@ def convert_videowiki_to_tapestry(
     max_slides: int = 50,
     image_width: int = 600,
     output: str | None = None,
+    generate_audio: bool = False,
+    tts_voice: str = TTS_VOICE,
 ):
     """Convert a VideoWiki page into a Tapestry slideshow."""
 
@@ -393,9 +428,9 @@ def convert_videowiki_to_tapestry(
     print(f"\n🎨 Building Tapestry slideshow layout ({len(image_slides)} slides)...")
     builder = TapestrySlideshowBuilder(page_title.replace("Wikipedia:VideoWiki/", ""))
 
-    # Create groups: one per image, each with image + narration + Commons button
+    # Create groups: one per image, each with image + narration + Commons button + optional audio
     slides_out = []
-    for islide in image_slides:
+    for idx, islide in enumerate(image_slides):
         disp_w, disp_h = get_display_dimensions(
             islide['orig_w'], islide['orig_h'], image_width
         )
@@ -417,10 +452,38 @@ def convert_videowiki_to_tapestry(
                                              label="🌐  View on Wikimedia Commons")
         btn_item['groupId'] = group_id
 
+        # Generate TTS audio for this slide (if enabled)
+        audio_item = None
+        if generate_audio:
+            print(f"   🎤 Generating TTS for slide {idx+1}...", end="")
+            sys.stdout.flush()
+            audio_data = generate_narration_audio(islide['narration'], voice=tts_voice)
+            if audio_data:
+                audio_uuid = make_id()
+                safe_name = re.sub(r'[^\w\- ]', '_', islide['title'])[:30] or 'narration'
+                audio_fname = f"items/{audio_uuid} ({safe_name}).mp3"
+                builder._binary_files[audio_fname] = audio_data
+                audio_item = {
+                    'id': make_id(),
+                    'type': 'audio',
+                    'position': {'x': 0, 'y': 0},
+                    'size': {'width': disp_w, 'height': AUDIO_HEIGHT},
+                    'title': '',
+                    'dropShadow': False,
+                    'groupId': group_id,
+                    'notes': None,
+                    'source': f"file:/{audio_fname}",
+                }
+                builder.root['items'].append(audio_item)
+                print(" ✓")
+            else:
+                print(" ⚠️  failed")
+
         slides_out.append({
             'img': img_item,
             'txt': txt_item,
             'btn': btn_item,
+            'audio': audio_item,
             'w': disp_w,
             'h': disp_h,
             'text_h': text_h,
@@ -440,15 +503,23 @@ def convert_videowiki_to_tapestry(
     for row in rows:
         row_w = sum(s['w'] + GAP_X for s in row) - GAP_X
         x_start = cx - row_w // 2
-        row_cell_h = max(s['h'] + GAP_TEXT + s['text_h'] + BTN_GAP + BTN_HEIGHT for s in row)
+        # Cell height: image + gap + text + button gap + button + audio gap + audio
+        row_cell_h = max(
+            s['h'] + GAP_TEXT + s['text_h'] + BTN_GAP + BTN_HEIGHT
+            + (AUDIO_GAP + AUDIO_HEIGHT if s['audio'] else 0)
+            for s in row
+        )
 
         for slide in row:
             slide['img']['position'] = {'x': x_start, 'y': y_cursor}
             slide['txt']['position'] = {'x': x_start, 'y': y_cursor + slide['h'] + GAP_TEXT}
-            slide['btn']['position'] = {
-                'x': x_start,
-                'y': y_cursor + slide['h'] + GAP_TEXT + slide['text_h'] + BTN_GAP,
-            }
+            btn_y = y_cursor + slide['h'] + GAP_TEXT + slide['text_h'] + BTN_GAP
+            slide['btn']['position'] = {'x': x_start, 'y': btn_y}
+            if slide['audio']:
+                slide['audio']['position'] = {
+                    'x': x_start,
+                    'y': btn_y + BTN_HEIGHT + AUDIO_GAP,
+                }
             group_ids.append(slide['group_id'])
             x_start += slide['w'] + GAP_X
 
@@ -499,6 +570,7 @@ def main():
             '  python3 videowiki-to-tapestry.py "Wikipedia:VideoWiki/Birthday_cake"\n'
             '  python3 videowiki-to-tapestry.py "https://en.wikipedia.org/wiki/Wikipedia:VideoWiki/Birthday_cake"\n'
             '  python3 videowiki-to-tapestry.py "Wikipedia:VideoWiki/A._P._J._Abdul_Kalam" --image-width 500\n'
+            '  python3 videowiki-to-tapestry.py "Wikipedia:VideoWiki/Birthday_cake" --tts\n'
         )
     )
     parser.add_argument("page", help="VideoWiki page title or full URL")
@@ -506,6 +578,10 @@ def main():
                         help="Maximum number of slides (default: 50)")
     parser.add_argument("--image-width", type=int, default=600,
                         help="Display width of each image in pixels (default: 600)")
+    parser.add_argument("--tts", action="store_true",
+                        help="Generate spoken narration audio for each slide (requires edge-tts)")
+    parser.add_argument("--tts-voice", default=TTS_VOICE,
+                        help=f"TTS voice (default: {TTS_VOICE})")
     parser.add_argument("--output", "-o", help="Output .zip file path")
 
     args = parser.parse_args()
@@ -531,6 +607,8 @@ def main():
         max_slides=args.max_slides,
         image_width=args.image_width,
         output=args.output,
+        generate_audio=args.tts,
+        tts_voice=args.tts_voice,
     )
 
 if __name__ == "__main__":
