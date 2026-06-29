@@ -235,7 +235,8 @@ def parse_videowiki(wikitext: str) -> list[dict]:
                 else:
                     ref_text = re.sub(r'<[^>]+>', '', raw).strip()[:80]
             citations.append({"ref_id": ref_id, "text": ref_text})
-            return f"{{{{{ref_id}}}}}"
+            # Use a placeholder that won't be caught by template stripping ({{...}})
+            return f"§§CIT{ref_id}§§"
 
         narration = content
         narration = re.sub(r'<ref[^>]*>(.*?)</ref>', save_ref, narration, flags=re.DOTALL)
@@ -278,10 +279,10 @@ def parse_videowiki(wikitext: str) -> list[dict]:
         # ── Replace citation placeholders ──
         for cit in citations:
             narration = narration.replace(
-                f"{{{{{cit['ref_id']}}}}}",
+                f"§§CIT{cit['ref_id']}§§",
                 f"<sup>[{cit['ref_id']}]</sup>"
             )
-            tts_narration = tts_narration.replace(f"{{{{{cit['ref_id']}}}}}", '')
+            tts_narration = tts_narration.replace(f"§§CIT{cit['ref_id']}§§", '')
 
         # ── Clean whitespace ──
         narration = re.sub(r'\n+', ' ', narration)
@@ -484,8 +485,6 @@ def convert_videowiki_to_tapestry(
         print(f"   Limiting to {max_slides} slides")
 
     # ── 3. Fetch image/video info from Commons per section ──
-    # Each section stays as one Tapestry group (no flattening).
-    # Multi-image sections get a sub-row of images within the group.
     print(f"\n🔍 Fetching media info from Commons...")
     total_images = sum(len(s['images']) for s in slides)
     image_idx = 0
@@ -523,7 +522,32 @@ def convert_videowiki_to_tapestry(
         print("⚠️  No images could be processed.", file=sys.stderr)
         return
 
-    # ── 4. Build the Tapestry layout ──
+    # ── 4. Renumber citations globally (after filtering dropped slides) ──
+    all_citations = []
+    global_cit = 0
+    for slide in slides:
+        if not slide.get('citations'):
+            continue
+        old_to_new = {}
+        for cit in slide['citations']:
+            old_ph = f"<sup>[{cit['ref_id']}]</sup>"
+            if old_ph not in slide['narration']:
+                continue
+            global_cit += 1
+            new_id = str(global_cit)
+            old_to_new[cit['ref_id']] = new_id
+            all_citations.append({'ref_id': new_id, 'text': cit['text']})
+        for old_id, new_id in old_to_new.items():
+            slide['narration'] = slide['narration'].replace(
+                f"<sup>[{old_id}]</sup>", f"<sup>[{new_id}]</sup>"
+            )
+        slide['citations'] = [{'ref_id': old_to_new[c['ref_id']], 'text': c['text']}
+                               for c in slide['citations']
+                               if c['ref_id'] in old_to_new]
+
+    print(f"   Global citations: {len(all_citations)}")
+
+    # ── 5. Build the Tapestry layout ──
     print(f"\n🎨 Building Tapestry slideshow layout ({len(slides)} groups)...")
     builder = TapestrySlideshowBuilder(page_title.replace("Wikipedia:VideoWiki/", ""))
 
@@ -680,7 +704,19 @@ def convert_videowiki_to_tapestry(
 
         y_cursor += row_cell_h + GAP_ROW
 
-    # ── 5. Credit footer (free-floating, not in any group) ──
+    # ── 6. References section (free-floating, not in any group) ──
+    y_cursor += GAP_ROW * 2
+    if all_citations:
+        ref_parts = ['<strong>References</strong><br><br>']
+        for cit in all_citations:
+            safe_text = html.escape(cit['text'])
+            ref_parts.append(f'<sup>{cit["ref_id"]}</sup> {safe_text}<br><br>')
+        ref_html = ''.join(ref_parts)
+        ref_h = max(TEXT_MIN_HEIGHT, len(all_citations) * 30 + 40)
+        builder.add_text_item(MARGIN, y_cursor, IMAGE_DISPLAY_WIDTH, ref_h, ref_html)
+        y_cursor += ref_h + GAP_ROW
+
+    # ── 7. Credit footer (free-floating, not in any group) ──
     script_url = f"https://en.wikipedia.org/wiki/{quote(page_title)}"
     credit_html = (
         f'<p style="text-align:center;font-size:0.85em;color:#888;">'
@@ -689,10 +725,9 @@ def convert_videowiki_to_tapestry(
         f' <a href="https://github.com/fuzheado/wikipedia-to-tapestries">wikipedia-to-tapestries</a>'
         f'</p>'
     )
-    footer_y = y_cursor + GAP_ROW
-    builder.add_text_item(MARGIN, footer_y, IMAGE_DISPLAY_WIDTH, TEXT_MIN_HEIGHT, credit_html)
+    builder.add_text_item(MARGIN, y_cursor, IMAGE_DISPLAY_WIDTH, TEXT_MIN_HEIGHT, credit_html)
 
-    # ── 6. Presentation — focus on each group ──
+    # ── 8. Presentation — focus on each group ──
     pres_step_ids = []
     for gid in group_ids:
         step_id = make_id()
@@ -704,7 +739,7 @@ def convert_videowiki_to_tapestry(
             'groupId': gid,
         })
 
-    # ── 7. Dynamic startView (include footer) ──
+    # ── 9. Dynamic startView (include footer) ──
     if builder.root['items']:
         xs = [i['position']['x'] for i in builder.root['items']]
         ys = [i['position']['y'] for i in builder.root['items']]
@@ -716,7 +751,7 @@ def convert_videowiki_to_tapestry(
             'size': {'width': max(ws) - min(xs) + pad * 2, 'height': max(hs) - min(ys) + pad * 2},
         }
 
-    # ── 8. Output path ──
+    # ── 10. Output path ──
     if output is None:
         safe = re.sub(r'[^\w\- ]', '_', page_title.replace("Wikipedia:VideoWiki/", ""))
         safe = re.sub(r'\s+', '_', safe)
