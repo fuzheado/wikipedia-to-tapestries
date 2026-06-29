@@ -66,6 +66,10 @@ AUDIO_GAP = 6       # gap between Commons button and audio player
 # Text-to-speech defaults
 TTS_VOICE = "en-US-JennyNeural"  # Microsoft neural voice
 
+# Action button defaults
+BUTTON_COLOR = "#dce8f5"  # pale blue — subtle, doesn't compete with images
+BUTTON_LABEL = "🌐  View on Wikimedia Commons"
+
 # ── Helpers ────────────────────────────────────────────────────────────────
 
 def make_id() -> str:
@@ -372,7 +376,8 @@ class TapestrySlideshowBuilder:
         self.root["items"].append(item)
         return item
 
-    def add_action_button(self, x, y, w, h, url, label="View on Commons"):
+    def add_action_button(self, x, y, w, h, url, label="View on Commons",
+                           background_color=None):
         item = {
             "id": make_id(),
             "type": "actionButton",
@@ -385,7 +390,7 @@ class TapestrySlideshowBuilder:
             "actionType": "externalLink",
             "action": url,
             "text": label,
-            "backgroundColor": "#3366cc",
+            "backgroundColor": background_color or BUTTON_COLOR,
         }
         self.root["items"].append(item)
         return item
@@ -449,6 +454,8 @@ def convert_videowiki_to_tapestry(
     generate_audio: bool = False,
     tts_voice: str = TTS_VOICE,
     text_scale: float = 1.0,
+    button_color: str = BUTTON_COLOR,
+    layout: str = "grid",
 ):
     """Convert a VideoWiki page into a Tapestry slideshow."""
 
@@ -554,7 +561,8 @@ def convert_videowiki_to_tapestry(
             btn_item = builder.add_action_button(
                 0, 0, disp_w, BTN_HEIGHT,
                 url=commons_url,
-                label="🌐  View on Wikimedia Commons"
+                label="🌐  View on Wikimedia Commons",
+                background_color=button_color,
             )
             btn_item['groupId'] = group_id
 
@@ -618,9 +626,14 @@ def convert_videowiki_to_tapestry(
             'group_id': group_id,
         })
 
-    # Arrange into roughly square rows
+    # Arrange into rows based on layout mode
     n_total = len(slides_out)
-    target_cols = max(1, round(n_total ** 0.5))
+    if layout == "horizontal":
+        target_cols = n_total  # one row, all items
+    elif layout == "vertical":
+        target_cols = 1        # one column, stacked
+    else:
+        target_cols = max(1, round(n_total ** 0.5))  # roughly square
     rows = [slides_out[i:i + target_cols] for i in range(0, n_total, target_cols)]
 
     cx = MARGIN + IMAGE_DISPLAY_WIDTH // 2
@@ -725,6 +738,8 @@ def main():
             '  python3 videowiki-to-tapestry.py "Wikipedia:VideoWiki/A._P._J._Abdul_Kalam" --image-width 500\n'
             '  python3 videowiki-to-tapestry.py "Wikipedia:VideoWiki/Birthday_cake" --tts\n'
             '  python3 videowiki-to-tapestry.py "Wikipedia:VideoWiki/Birthday_cake" --text-scale 1.5\n'
+            '  python3 videowiki-to-tapestry.py "Wikipedia:VideoWiki/Birthday_cake" --layout horizontal\n'
+            '  python3 videowiki-to-tapestry.py "Wikipedia:VideoWiki/Birthday_cake" --button-color "#e8f0fe"\n'
         )
     )
     parser.add_argument("page", help="VideoWiki page title or full URL")
@@ -738,6 +753,10 @@ def main():
                         help=f"TTS voice (default: {TTS_VOICE})")
     parser.add_argument("--text-scale", type=float, default=1.0,
                         help="Scale caption text height by multiplier (e.g. 1.5 for more room)")
+    parser.add_argument("--button-color", default=BUTTON_COLOR,
+                        help=f"Action button background hex color (default: {BUTTON_COLOR})")
+    parser.add_argument("--layout", choices=["grid", "horizontal", "vertical"], default="grid",
+                        help="Layout: grid (square-ish), horizontal (single row), vertical (single column)")
     parser.add_argument("--output", "-o", help="Output .zip file path")
 
     args = parser.parse_args()
@@ -766,6 +785,8 @@ def main():
         generate_audio=args.tts,
         tts_voice=args.tts_voice,
         text_scale=args.text_scale,
+        button_color=args.button_color,
+        layout=args.layout,
     )
 
 if __name__ == "__main__":
