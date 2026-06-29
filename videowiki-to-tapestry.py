@@ -270,9 +270,10 @@ def parse_videowiki(wikitext: str) -> list[dict]:
         # ── Strip wiki markup ──
         narration = re.sub(r"'''?", '', narration)
         tts_narration = re.sub(r"'''?", '', tts_narration)
-        for t in [narration, tts_narration]:
-            t = re.sub(r"\[\[([^\]|]+)\|([^\]|]+)\]\]", r'\2', t)
-            t = re.sub(r"\[\[([^\]|]+)\]\]", r'\1', t)
+        narration = re.sub(r"\[\[([^\]|]+)\|([^\]|]+)\]\]", r'\2', narration)
+        narration = re.sub(r"\[\[([^\]|]+)\]\]", r'\1', narration)
+        tts_narration = re.sub(r"\[\[([^\]|]+)\|([^\]|]+)\]\]", r'\2', tts_narration)
+        tts_narration = re.sub(r"\[\[([^\]|]+)\]\]", r'\1', tts_narration)
 
         # ── Replace citation placeholders ──
         for cit in citations:
