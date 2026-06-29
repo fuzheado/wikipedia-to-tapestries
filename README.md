@@ -8,6 +8,12 @@ the **article itself** as an embedded webpage in the center, and **linked articl
 from the lead section below in either a grid or semicircle layout, connected with arrows.
 Includes a guided presentation tour through all items and a dynamic start view.
 
+> **🧪 Instant testing:** Use **[viewer.tapestries.media](https://viewer.tapestries.media)** to preview any `.zip` file
+> immediately — **no sign-in, no upload, no account needed.** Just drag the file onto the page.
+> You can also load a hosted zip via URL:
+> `viewer.tapestries.media?source=https://example.com/chess.zip`
+> This works for all three converters below.
+
 ## Quick Start
 
 ```bash
