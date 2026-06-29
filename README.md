@@ -22,7 +22,12 @@ python3 wikipedia-to-tapestry.py "Chess" -o chess.zip
 # 3. Validate the output
 python3 validate-tapestry.py chess.zip
 
-# 4. Upload to Tapestries
+# 4. Preview locally (no sign-in needed)
+#    Go to https://viewer.tapestries.media and drag chess.zip onto the page
+#    Or host the zip somewhere and load it programmatically:
+#    https://viewer.tapestries.media?source=https://example.com/chess.zip
+#
+# 5. Upload to Tapestries
 #    Drag chess.zip onto https://tapestries.media
 ```
 
@@ -139,7 +144,9 @@ python3 wikipedia-images-to-tapestry.py "https://en.wikipedia.org/wiki/Article"
 ```bash
 python3 wikipedia-images-to-tapestry.py "Great Barrier Reef" -o reef_slideshow.zip
 python3 validate-tapestry.py reef_slideshow.zip
-# Drag reef_slideshow.zip onto https://tapestries.media
+# Preview: go to https://viewer.tapestries.media and drag the zip onto the page
+#    Or host the zip and load via URL: https://viewer.tapestries.media?source=https://...
+# Import: drag the zip onto https://tapestries.media
 
 # Full thumbnails of pages and nice arrangement
 python3 wikipedia-to-tapestry.py "2024 Sundance Film Festival" --layout semicircle --screenshots --max-links 8 --max-gallery 40 --gallery-height 150
@@ -227,6 +234,83 @@ python3 wikipedia-images-to-tapestry.py "Elephant" --image-width 700
 
 # Custom output name
 python3 wikipedia-images-to-tapestry.py "https://en.wikipedia.org/wiki/Coral_reef" -o coral_reef_slideshow.zip
+```
+
+---
+
+## VideoWiki → Slideshow
+
+Converts a [VideoWiki](https://meta.wikimedia.org/wiki/VideoWiki) script page into a
+Tapestry slideshow. VideoWiki scripts structure Wikipedia content into sections,
+each with a hand-picked image and narration text written to be read aloud.
+This converter preserves that narrative flow as an interactive Tapestry.
+
+```bash
+python3 videowiki-to-tapestry.py "Wikipedia:VideoWiki/Birthday_cake" [options]
+python3 videowiki-to-tapestry.py "https://en.wikipedia.org/wiki/Wikipedia:VideoWiki/Birthday_cake"
+```
+
+### Quick Start
+
+```bash
+python3 videowiki-to-tapestry.py "Wikipedia:VideoWiki/Birthday_cake" -o birthday_cake_videowiki.zip
+python3 validate-tapestry.py birthday_cake_videowiki.zip
+# Preview: https://viewer.tapestries.media?source=https://example.com/birthday_cake_videowiki.zip
+```
+
+### Options
+
+| Flag | Default | Description |
+|---|---|---|
+| `--max-slides N` | 50 | Max slides to include |
+| `--image-width N` | 600 | Display width of each image in pixels |
+| `--output`, `-o` | auto | Output `.zip` file path |
+
+### What It Does
+
+Each VideoWiki section becomes a **slide** on the canvas. Sections with multiple
+images create consecutive slides, one per image.
+
+```
+┌──────────────────────────┐
+│  Section image (600px)   │
+├──────────────────────────┤
+│  Section heading         │
+│  Narration text          │
+│  (the spoken script)     │
+├──────────────────────────┤
+│ 🌐 View on Commons  │  ← opens the file's Commons page
+└──────────────────────────┘
+```
+
+### How It Works
+
+1. **Fetch wikitext** — retrieves the raw VideoWiki script via `action=raw`
+2. **Parse sections** — finds `==Section==` headings, extracts narration text,
+   collects `[[File:...]]` image references, strips wiki markup and templates
+3. **Fetch Commons image info** — thumbnail URL and dimensions per image
+4. **Build slideshow** — same group-based layout as the image slideshow converter
+
+### What's Different from the Image Converter
+
+| Image slideshow | VideoWiki slideshow |
+|---|---|
+| Auto-extracts all images from an article | Images are **hand-curated** per section |
+| Needs `is_useful_image()` filter | No filtering needed |
+| Commons metadata as captions | **Narration text** IS the caption |
+| Single image per slide | **Multiple images** per section (one per slide) |
+
+### Examples
+
+```bash
+# 8 slides, one per section
+python3 videowiki-to-tapestry.py "Wikipedia:VideoWiki/Birthday_cake"
+
+# 17 slides (15 sections, 2 have multiple images)
+python3 videowiki-to-tapestry.py "Wikipedia:VideoWiki/A._P._J._Abdul_Kalam" --image-width 500
+
+# From URL
+python3 videowiki-to-tapestry.py "https://en.wikipedia.org/wiki/Wikipedia:VideoWiki/Birthday_cake"
 ```
 
 ---
