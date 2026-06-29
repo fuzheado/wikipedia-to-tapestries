@@ -594,14 +594,8 @@ def convert_videowiki_to_tapestry(
 
         # Build caption with citation footnotes (feature 5)
         caption_html = format_narration_html(slide['title'], slide['narration'])
-        if slide.get('citations'):
-            cit_parts = ['<br><br><span style="font-size:0.8em;color:#888;">']
-            for cit in slide['citations']:
-                safe_text = html.escape(cit['title'])
-                safe_id = html.escape(cit['ref_id'])
-                cit_parts.append(f"<strong>[{safe_id}]</strong> {safe_text}<br>")
-            cit_parts.append('</span>')
-            caption_html += ''.join(cit_parts)
+        # Citation footnotes are placed in the references section at the end,
+        # not in individual slide captions
 
         text_h = int(estimate_text_height(caption_html, image_width) * text_scale)
         txt_item = builder.add_text_item(0, 0, image_width, text_h, caption_html)
