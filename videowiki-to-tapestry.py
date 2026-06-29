@@ -224,18 +224,17 @@ def parse_videowiki(wikitext: str) -> list[dict]:
         def save_ref(m):
             ref_id = str(len(citations) + 1)
             raw = m.group(1)
-            # Try to extract a readable title/URL from cite templates
+            # Extract title and url from cite templates
             title_m = re.search(r'\btitle\s*=\s*([^|}]+)', raw, re.IGNORECASE)
-            if title_m:
-                ref_text = title_m.group(1).strip()[:120]
-            else:
-                url_m = re.search(r'\burl\s*=\s*([^|}]+)', raw, re.IGNORECASE)
-                if url_m:
-                    ref_text = url_m.group(1).strip()[:80]
-                else:
-                    ref_text = re.sub(r'<[^>]+>', '', raw).strip()[:80]
-            citations.append({"ref_id": ref_id, "text": ref_text})
-            # Use a placeholder that won't be caught by template stripping ({{...}})
+            ref_title = title_m.group(1).strip() if title_m else ''
+            url_m = re.search(r'\burl\s*=\s*([^|}]+)', raw, re.IGNORECASE)
+            ref_url = url_m.group(1).strip() if url_m else ''
+            if not ref_title and ref_url:
+                ref_title = ref_url
+            if not ref_title:
+                ref_title = re.sub(r'<[^>]+>', '', raw).strip()[:80]
+            citations.append({"ref_id": ref_id, "title": ref_title, "url": ref_url})
+            # Placeholder for [N] style (not <sup>, which doesn't work in Tapestries)
             return f"§§CIT{ref_id}§§"
 
         narration = content
@@ -280,7 +279,7 @@ def parse_videowiki(wikitext: str) -> list[dict]:
         for cit in citations:
             narration = narration.replace(
                 f"§§CIT{cit['ref_id']}§§",
-                f"<sup>[{cit['ref_id']}]</sup>"
+                f" [{cit['ref_id']}]"
             )
             tts_narration = tts_narration.replace(f"§§CIT{cit['ref_id']}§§", '')
 
@@ -530,18 +529,18 @@ def convert_videowiki_to_tapestry(
             continue
         old_to_new = {}
         for cit in slide['citations']:
-            old_ph = f"<sup>[{cit['ref_id']}]</sup>"
+            old_ph = f" [{cit['ref_id']}]"  # [N] format, not <sup> which doesn't work in Tapestries
             if old_ph not in slide['narration']:
                 continue
             global_cit += 1
             new_id = str(global_cit)
             old_to_new[cit['ref_id']] = new_id
-            all_citations.append({'ref_id': new_id, 'text': cit['text']})
+            all_citations.append({'ref_id': new_id, 'title': cit['title'], 'url': cit.get('url', '')})
         for old_id, new_id in old_to_new.items():
             slide['narration'] = slide['narration'].replace(
-                f"<sup>[{old_id}]</sup>", f"<sup>[{new_id}]</sup>"
+                f" [{old_id}]", f" [{new_id}]"
             )
-        slide['citations'] = [{'ref_id': old_to_new[c['ref_id']], 'text': c['text']}
+        slide['citations'] = [{'ref_id': old_to_new[c['ref_id']], 'title': c['title'], 'url': c.get('url', '')}
                                for c in slide['citations']
                                if c['ref_id'] in old_to_new]
 
@@ -598,9 +597,9 @@ def convert_videowiki_to_tapestry(
         if slide.get('citations'):
             cit_parts = ['<br><br><span style="font-size:0.8em;color:#888;">']
             for cit in slide['citations']:
-                safe_text = html.escape(cit['text'])
+                safe_text = html.escape(cit['title'])
                 safe_id = html.escape(cit['ref_id'])
-                cit_parts.append(f"<sup>{safe_id}</sup> {safe_text}<br>")
+                cit_parts.append(f"<strong>[{safe_id}]</strong> {safe_text}<br>")
             cit_parts.append('</span>')
             caption_html += ''.join(cit_parts)
 
@@ -709,8 +708,16 @@ def convert_videowiki_to_tapestry(
     if all_citations:
         ref_parts = ['<strong>References</strong><br><br>']
         for cit in all_citations:
-            safe_text = html.escape(cit['text'])
-            ref_parts.append(f'<sup>{cit["ref_id"]}</sup> {safe_text}<br><br>')
+            safe_title = html.escape(cit['title'])
+            ref_url = cit.get('url', '')
+            if ref_url:
+                safe_url = html.escape(ref_url)
+                ref_parts.append(
+                    f'<strong>[{cit["ref_id"]}]</strong> '
+                    f'<a href="{safe_url}">{safe_title}</a><br><br>'
+                )
+            else:
+                ref_parts.append(f'<strong>[{cit["ref_id"]}]</strong> {safe_title}<br><br>')
         ref_html = ''.join(ref_parts)
         ref_h = max(TEXT_MIN_HEIGHT, len(all_citations) * 30 + 40)
         builder.add_text_item(MARGIN, y_cursor, IMAGE_DISPLAY_WIDTH, ref_h, ref_html)
