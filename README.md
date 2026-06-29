@@ -270,53 +270,94 @@ python3 validate-tapestry.py birthday_cake_videowiki.zip
 |---|---|---|
 | `--max-slides N` | 50 | Max slides to include |
 | `--image-width N` | 600 | Display width of each image in pixels |
+| `--tts` | off | Generate spoken narration audio via edge-tts |
+| `--tts-voice` | `en-US-JennyNeural` | TTS voice for narration |
+| `--text-scale` | 1.0 | Scale caption text height (e.g. 1.5 for more room) |
+| `--button-color` | `#dce8f5` | Action button background hex color |
+| `--layout` | `grid` | Layout: `grid`, `horizontal`, or `vertical` |
 | `--output`, `-o` | auto | Output `.zip` file path |
 
-### What It Does
+### What It Produces
 
-Each VideoWiki section becomes a **slide** on the canvas. Sections with multiple
-images create consecutive slides, one per image.
+Each VideoWiki section becomes one **group** on the canvas with all its images
+in a centered sub-row. Sections with multiple images (e.g., "Early life" with
+3 photos) keep them together in one group, sharing the narration text.
 
 ```
-┌──────────────────────────┐
-│  Section image (600px)   │
-├──────────────────────────┤
-│  Section heading         │
-│  Narration text          │
-│  (the spoken script)     │
-├──────────────────────────┤
-│ 🌐 View on Commons  │  ← opens the file's Commons page
-└──────────────────────────┘
+┌──────────────────────────────────┐
+│  🏷️ Title card (auto-generated) │
+├──────────────────────────────────┤
+│  ┌──────┐ ┌──────┐              │
+│  │Img 1 │ │Img 2 │  ← sub-row  │
+│  └──────┘ └──────┘              │
+│  ┌──────┐ ┌──────┐              │
+│  │btn 1 │ │btn 2 │  per-image  │
+│  └──────┘ └──────┘              │
+├──────────────────────────────────┤
+│  Section heading + narration    │
+│  text (the spoken script)       │
+├──────────────────────────────────┤
+│ ▶️ Audio player (if --tts)    │
+└──────────────────────────────────┘
+        ... more groups ...
+┌──────────────────────────────────┐
+│  References (clickable URLs)     │
+├──────────────────────────────────┤
+│  Credit footer                   │
+└──────────────────────────────────┘
+```
+
+### Layout Modes
+
+| Mode | Shape | Use case |
+|---|---|---|
+| `grid` (default) | Roughly square (`round(sqrt(N))` columns) | General purpose |
+| `horizontal` | Single row of all slides | Filmstrip / slideshow bar |
+| `vertical` | Single column, stacked | Story / timeline scroll |
+
+### TTS Audio Narration
+
+Pass `--tts` to generate spoken narration for each slide using Microsoft's
+neural TTS voice (edge-tts). Each slide gets an audio player embedded in its
+group — visible when the presentation focuses on the group. Click play to hear
+the narration for that slide.
+
+Requires `edge-tts`:
+```bash
+source venv/bin/activate
+pip install edge-tts
 ```
 
 ### How It Works
 
 1. **Fetch wikitext** — retrieves the raw VideoWiki script via `action=raw`
 2. **Parse sections** — finds `==Section==` headings, extracts narration text,
-   collects `[[File:...]]` image references, strips wiki markup and templates
-3. **Fetch Commons image info** — thumbnail URL and dimensions per image
-4. **Build slideshow** — same group-based layout as the image slideshow converter
-
-### What's Different from the Image Converter
-
-| Image slideshow | VideoWiki slideshow |
-|---|---|
-| Auto-extracts all images from an article | Images are **hand-curated** per section |
-| Needs `is_useful_image()` filter | No filtering needed |
-| Commons metadata as captions | **Narration text** IS the caption |
-| Single image per slide | **Multiple images** per section (one per slide) |
+   collects `[[File:...]]` image references, strips wiki markup and templates,
+   extracts {{ReadShow}} display/speech text, saves citations with URLs
+3. **Fetch Commons image info** — thumbnail URL and dimensions (handles video too)
+4. **Build slideshow** — same group-based layout with sqrt(N) grid positioning
+5. **References section** — all citations collected globally, numbered 1..N,
+   rendered as clickable `<a href>` links at the bottom of the canvas
+6. **Title card** — auto-generated from the page name at the top
+7. **Credit footer** — links to the source script and github.com/fuzheado/wikipedia-to-tapestries
 
 ### Examples
 
 ```bash
-# 8 slides, one per section
+# Basic 8-slide grid
 python3 videowiki-to-tapestry.py "Wikipedia:VideoWiki/Birthday_cake"
 
-# 17 slides (15 sections, 2 have multiple images)
-python3 videowiki-to-tapestry.py "Wikipedia:VideoWiki/A._P._J._Abdul_Kalam" --image-width 500
+# Vertical strip with spoken narration
+python3 videowiki-to-tapestry.py "Wikipedia:VideoWiki/Urinary_tract_infection" \
+    --layout vertical --tts
 
-# From URL
-python3 videowiki-to-tapestry.py "https://en.wikipedia.org/wiki/Wikipedia:VideoWiki/Birthday_cake"
+# Grid with narration (requires edge-tts)
+python3 videowiki-to-tapestry.py "https://en.wikipedia.org/wiki/Wikipedia:VideoWiki/Birthday_cake" \
+    --tts
+
+# Horizontal filmstrip, larger captions
+python3 videowiki-to-tapestry.py "Wikipedia:VideoWiki/A._P._J._Abdul_Kalam" \
+    --layout horizontal --text-scale 1.3
 ```
 
 ---

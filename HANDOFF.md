@@ -1,156 +1,130 @@
-# Handoff — Wikipedia → Tapestry Visual Map Converter
+# Handoff — Wikipedia → Tapestry Converters
 
-**Date:** June 22, 2026
-**Status:** Feature-complete, actively used, v1.0.0 tagged
+**Date:** June 29, 2026
+**Status:** Three converters, actively used
 
 ## What This Is
 
-A Python script that converts any Wikipedia article into a `.tapestry.zip` file
-for import into [Tapestries](https://tapestries.media). It arranges the article
-as a visual map: image gallery at top, article embed in the center, linked articles
-below. Includes presentation tours, dynamic start view, and optional browser
-screenshot thumbnails.
+A collection of Python scripts that convert Wikipedia content into `.zip` files
+for import into [Tapestries](https://tapestries.media) — an infinite canvas
+multimedia authoring platform.
 
 ## File Structure
 
 ```
 ~/Documents/ai/tapestry-converter/
-├── wikipedia-to-tapestry.py   # Main converter (654 lines)
-├── validate-tapestry.py       # Symlink → skill dir validator
-├── README.md                  # Full usage docs
-├── requirements.txt            # Python deps (requests)
-└── .gitignore                  # *.zip, playwright cache
+├── wikipedia-to-tapestry.py           # Original visual map converter
+├── wikipedia-images-to-tapestry.py    # Image slideshow converter
+├── videowiki-to-tapestry.py           # VideoWiki script slideshow converter
+├── validate-tapestry.py               # Symlink → skill dir validator
+├── README.md                          # Full usage docs
+├── HANDOFF.md                         # This file
+├── IDEAS.md                           # General future project ideas
+├── IDEAS-WIKIPORTRAITS.md            # WikiPortraits-specific ideas
+├── requirements.txt                   # Python deps (requests)
+├── samples/                           # Example .zip outputs
+└── .gitignore                         # *.zip, playwright cache
 ```
 
 The companion skill ([github.com/fuzheado/tapestries-skill](https://github.com/fuzheado/tapestries-skill))
 contains the full v7 format specification, validator, and test files.
-format specification, validator, and test files.
 
-## Architecture
+## Converters
 
-The converter runs entirely in Python using the Wikimedia REST and Action APIs:
+### 1. Visual Map (`wikipedia-to-tapestry.py`)
 
-1. **Page summary** — REST API `/page/summary/{title}` — gets title, description, lead image
-2. **Lead section links** — Action API `parse&section=0&prop=links` — wikilinks from first paragraph
-3. **Linked article summaries** — REST API per linked article (fetched with rate limiting)
-4. **Article images** — Action API `parse&prop=images` — all images on the fully-rendered page
-5. **Image dimensions** — Action API `prop=imageinfo&iiprop=url|size` — dimensions without downloading
-6. **Tapestry builder** — Constructs v7-compliant JSON items and writes the zip
+The original converter. Turns any Wikipedia article into a visual map:
+image gallery at top, article embed in the center, linked articles below.
+
+**Architecture:**
+1. Page summary via REST API
+2. Lead section links via Action API
+3. Linked article summaries via REST API
+4. Article images via `parse&prop=images`
+5. Image dimensions via `prop=imageinfo&iiprop=url|size`
+6. Tapestry builder — v7-compliant JSON
+
+**Key features:** grid/semicircle layout, browser screenshots, disambiguation filtering,
+icon filtering, packed mode, mobile Wikipedia URLs.
+
+### 2. Image Slideshow (`wikipedia-images-to-tapestry.py`)
+
+Extracts all useful images from any Wikipedia article into a navigable photo
+mosaic. sqrt(N) grid layout, Commons metadata as captions (SDC + extmetadata),
+group-based presentation, Commons link buttons, disk caching.
+
+### 3. VideoWiki Slideshow (`videowiki-to-tapestry.py`)
+
+Converts VideoWiki scripts into interactive slideshows with hand-picked images,
+narration text, TTS audio, and clickable references. Latest and most feature-rich.
+
+**Key features:**
+- Parses VideoWiki wikitext (sections, narration, images, {{ReadShow}}, citations)
+- Multi-image sub-rows within a single group
+- TTS narration via edge-tts (`--tts`)
+- Three layout modes: grid, horizontal, vertical
+- Global citation numbering with clickable URL references section
+- Auto-generated title card and credit footer
+- Configurable button color, text scale, image width
 
 ## Key Design Decisions
 
 ### Images use URLs, not embedded files
-Gallery images use Wikimedia Commons URLs directly as `source`. This keeps the zip
-under 200 KB regardless of gallery size. Dimensions come from a single API call
-per image (`iiprop=size`) — no image data transferred during sizing.
+All converters use Wikimedia Commons URLs directly as `source`. Zips stay under
+~20 KB without audio, ~350-750 KB with TTS audio.
 
-### parse+images vs prop=images
-`action=parse&prop=images` returns ~2× more images than `prop=images` because it
-processes the fully-rendered page (galleries, infoboxes, templates). The `File:`
-prefix is required when querying `prop=imageinfo`.
+### Group-based presentation
+Each slide's items (image, text, button, audio) share a `groupId`. Presentation
+steps target the group, zooming the viewport to show all items together.
 
-### Thumbnails via {renditions}
-Webpage item thumbnails must use the `{renditions: [{source, format, size,
-isPrimary, isAutoGenerated}]}` format. The simple `{source, size}` format is
-rejected by the deployed v7 parser. The `--screenshots` flag captures actual
-browser renders via Playwright at 500×500.
+### VideoWiki narration as caption
+Unlike the image slideshow (which uses Commons metadata), the VideoWiki converter
+uses the script's narration text — already written to be spoken alongside visuals.
 
-### Rate limiting
-Wikimedia's `upload.wikimedia.org` aggressively rate-limits. 300ms delay between
-requests. User-Agent must include "bot" identifier.
-
-## Feature Checklist
+## Feature Checklist — VideoWiki Converter
 
 | Feature | Status | Notes |
 |---|---|---|
-| Basic article conversion | ✅ | |
-| Image gallery (center-aligned rows) | ✅ | Dynamic row grouping, centered on main article |
-| Linked articles (grid layout) | ✅ | 2-column grid below article |
-| Linked articles (semicircle layout) | ✅ | `--layout semicircle`, smile-shaped arc |
-| Presentation tour | ✅ | Main → gallery images → linked articles |
-| Dynamic startView | ✅ | Bounding box of all items + padding |
-| Webpage thumbnails (lead image) | ✅ | Default behavior |
-| Webpage thumbnails (screenshots) | ✅ | `--screenshots` flag, Playwright at 500×500 |
-| Disambiguation filtering | ✅ | Via REST API `type: "disambiguation"` |
-| Icon/image filtering | ✅ | `is_useful_image()` pattern filter |
-| Packed mode | ✅ | `--packed`, no filenames, tighter spacing |
-| Mobile Wikipedia URLs | ✅ | `?useformat=mobile` parameter |
-| Rate limiting / bot UA | ✅ | 300ms delay, "bot" identifier |
-| File naming compliance | ✅ | `items/<uuid> (<name>).ext` |
-| v7 format compliance | ✅ | No `customThumbnail`, no `internallyHosted` |
+| Wikitext parsing (sections, images, narration) | ✅ | |
+| Citation extraction with URLs | ✅ | |
+| {{ReadShow}} display/speech separation | ✅ | |
+| Multi-image sub-rows | ✅ | Sections with 2-3 images stay in one group |
+| Video file support | ✅ | .webm, .mp4, .ogv → video items |
+| TTS narration (edge-tts) | ✅ | `--tts` flag, per-slide MP3 audio |
+| Three layout modes | ✅ | `--layout grid|horizontal|vertical` |
+| Global citation numbering | ✅ | 1..N across all slides |
+| References section with clickable URLs | ✅ | |
+| Title card | ✅ | Auto-generated from page name |
+| Credit footer | ✅ | Links to source and converter repo |
+| Configurable button color | ✅ | `--button-color` hex option |
+| Text scale | ✅ | `--text-scale` for caption height |
 
 ## Known Limitations
 
-1. **Generic webpage thumbnails show "generating…"** — The server worker doesn't
-   generate `{renditions}` thumbnails for generic URLs. `--screenshots` works
-   around this with Playwright, but requires a browser.
-
-2. **Rate limiting on image-heavy articles** — Articles with 40+ images require
-   40+ API calls for dimensions, each with a 300ms delay (~12 seconds). The
-   `--max-gallery` flag controls this.
-
-3. **Disambiguation filtering removes links silently** — Filtered links reduce
-   the count below `--max-links`. A message is printed for each skip.
-
-4. **Playwright not pip-installable** — `--screenshots` requires the separate
-   npm package `@playwright/cli`, which may not be available in all environments.
+1. **No built-in auto-play for audio** — TTS audio plays manually; the viewer
+   doesn't support auto-advance or auto-play during presentation navigation.
+2. **TTS requires edge-tts** — Not included in requirements.txt; must be
+   installed separately (`pip install edge-tts`).
+3. **Citation URL resolution** — Extracts URLs from cite templates but doesn't
+   resolve shortDOIs or handle all citation format variants.
+4. **No batch mode** — Each article converted individually; no multi-article
+   or category-level batch processing.
 
 ## Future Directions
 
-### Short-term (small improvements)
+See `IDEAS.md` and `IDEAS-WIKIPORTRAITS.md` for detailed project ideas.
+Key areas:
 
-- **Paragraph text fallback** — When lead image or screenshots fail for a webpage
-  thumbnail, consider adding a small text item showing the article description
-  as fallback.
-- **More image filters** — The `is_useful_image()` function has a hand-curated
-  list of icon patterns. Could be extended or made configurable.
-- **Multi-language support** — The converter works with any Wikipedia language
-  via `--lang`, but the icon filter patterns are English-centric.
-
-### Medium-term (new features)
-
-- **Section extraction** — Instead of just the first paragraph's links, offer
-  an option to include links from all sections (like a full "See also" map).
-- **PDF generation** — Wikipedia articles often have PDF versions. Could include
-  `pdf` items alongside webpage embeds.
-- **Citation links** — Extract DOIs, ISBNs, or external links from references
-  and map them as `webpage` or `actionButton` items.
-- **WikiData integration** — Enrich linked articles with WikiData properties
-  (image, description, coordinates) for richer thumbnails.
-
-### Long-term (infrastructure)
-
-- **i18n framework** — Replace hardcoded strings and patterns with locale files.
-- **Parallelism** — The sequential API calls (0.3s delay each) are the main
-  bottleneck. Image dimension fetching could be parallelized with a small thread
-  pool, keeping per-thread delays.
-- **Caching** — Wikipedia data changes rarely. An optional local cache
-  (e.g., `~/.cache/tapestry-converter/`) would dramatically speed up repeated
-  conversions of the same article.
-- **Plugin architecture** — Separate the "extract Wikipedia data" phase from the
-  "build Tapestry" phase, allowing different input sources (e.g., a generic RSS
-  or JSON input).
-
-### For the Tapestry Project itself
-
-- **Improve import error reporting** — Currently the import job shows only
-  `status: "failed"` with no details. Errors are logged server-side but not
-  exposed. A `failureReason` field on the create-job response would save
-  implementers hours of debugging.
-- **Document the v7 schema** — The public repo has schemas only up to v6. The
-  deployed v7 schema adds `parentId`, `presentation`, and changes the thumbnail
-  format. Publishing it would enable the community to build better tools.
-- **Generic webpage thumbnail worker** — The server generates `{renditions}` for
-  YouTube/Vimeo/IA embeds but not for generic URLs. A headless-browser thumbnail
-  worker for all webpage items would improve the experience.
-- **Validator endpoint** — A `POST /api/validate` that runs the Zod schema check
-  and returns errors would let tool builders validate without going through the
-  full import pipeline.
+- Batch convert all VideoWiki scripts from `Category:Videowiki_scripts`
+- Auto-play audio on presentation step (viewer-side feature)
+- WikiPortraits integration (portrait galleries, career evolution, event maps)
+- Wikidata enrichment for images (subject QID lookup)
+- HTML/PDF export option alongside Tapestry zip
 
 ## Who Built This
 
-Developed in June 2026 through reverse-engineering the Tapestry v7 export format
-by comparing production `.zip` files exported from `tapestries.media` against
-converter output. The full format specification is documented in the companion
-Tapestry format skill at
+Developed June 2026 by reverse-engineering the Tapestry v7 export format from
+production `.zip` files. The canonical v7 Zod schema is at
+[github.com/asteasolutions/tapestry-project](https://github.com/asteasolutions/tapestry-project).
+The Tapestry format skill is at
 [github.com/fuzheado/tapestries-skill](https://github.com/fuzheado/tapestries-skill).
