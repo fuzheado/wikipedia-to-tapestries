@@ -79,12 +79,12 @@ def wiki_request(url, params=None, max_retries=3):
             return resp.json()
         if resp.status_code == 429:
             retry_after = int(resp.headers.get("Retry-After", 10))
-            print(f"  ⏳ Rate limited — waiting {retry_after}s...", file=sys.stderr)
+            print(f"  ⏳ Rate limited - waiting {retry_after}s...", file=sys.stderr)
             time.sleep(retry_after)
             continue
         if resp.status_code == 403:
             raise PermissionError(
-                "403 Forbidden — check User-Agent header. "
+                "403 Forbidden - check User-Agent header. "
                 + resp.text
             )
         resp.raise_for_status()
@@ -128,6 +128,30 @@ def get_image_info_from_commons(filename: str, req_width: int = 800):
         print(f"  ⚠️  Could not fetch info for {filename}: {e}", file=sys.stderr)
     return None
 
+def get_video_info_from_commons(filename: str) -> dict | None:
+    """Get video thumbnail URL from Commons."""
+    fname = filename if filename.startswith("File:") else f"File:{filename}"
+    retrying_sleep(0.3)
+    try:
+        data = wiki_request(COMMONS_API, {
+            "action": "query",
+            "titles": fname,
+            "prop": "videoinfo",
+            "viprop": "thumburl|size",
+            "format": "json",
+        })
+        for pdata in data.get("query", {}).get("pages", {}).values():
+            info = pdata.get("videoinfo", [])
+            if info:
+                return {
+                    "thumb_url": info[0].get("thumburl") or info[0].get("url"),
+                    "orig_w": info[0].get("width", 640),
+                    "orig_h": info[0].get("height", 480),
+                }
+    except Exception as e:
+        print(f"  ⚠️  Could not fetch video info for {filename}: {e}", file=sys.stderr)
+    return None
+
 def get_display_dimensions(orig_w: int, orig_h: int, max_width: int):
     """Calculate display dimensions preserving aspect ratio."""
     if orig_w <= 0 or orig_h <= 0:
@@ -155,8 +179,9 @@ def estimate_text_height(text_html: str, max_width: int) -> int:
 
 def parse_videowiki(wikitext: str) -> list[dict]:
     """Parse VideoWiki wikitext into slides.
-    
-    Returns list of dicts: {title, narration, images: [filename, ...]}
+
+    Returns list of dicts: {title, narration, tts_text, images: [filename, ...],
+                           citations: [{ref_id, text}]}
     """
     # Find the ==References== boundary if present
     ref_match = re.search(r'^==\s*References\s*==', wikitext, re.MULTILINE)
@@ -182,7 +207,7 @@ def parse_videowiki(wikitext: str) -> list[dict]:
         else:
             content = wikitext[h_end:]
 
-        # Extract images: [[File:...]]
+        # Extract images (including videos): [[File:...]]
         images = re.findall(r'\[\[File\s*:\s*([^\]|]+)', content, re.IGNORECASE)
         images = [f.strip() for f in images if f.strip()]
 
@@ -190,41 +215,86 @@ def parse_videowiki(wikitext: str) -> list[dict]:
         if not images:
             continue
 
-        # Extract narration: strip markup, keep readable text
-        narration = content
+        # ── Extract and preserve citations ──
+        citations = []
+        def save_ref(m):
+            ref_id = str(len(citations) + 1)
+            raw = m.group(1)
+            # Try to extract a readable title/URL from cite templates
+            title_m = re.search(r'\btitle\s*=\s*([^|}]+)', raw, re.IGNORECASE)
+            if title_m:
+                ref_text = title_m.group(1).strip()[:120]
+            else:
+                url_m = re.search(r'\burl\s*=\s*([^|}]+)', raw, re.IGNORECASE)
+                if url_m:
+                    ref_text = url_m.group(1).strip()[:80]
+                else:
+                    ref_text = re.sub(r'<[^>]+>', '', raw).strip()[:80]
+            citations.append({"ref_id": ref_id, "text": ref_text})
+            return f"{{{{{ref_id}}}}}"
 
-        # Remove [[File:...]] links entirely
+        narration = content
+        narration = re.sub(r'<ref[^>]*>(.*?)</ref>', save_ref, narration, flags=re.DOTALL)
+        narration = re.sub(r'<ref[^>]*/>', '', narration)
+
+        # ── Remove [[File:...]] links ──
         narration = re.sub(r'\[\[\s*File\s*:[^\[\]]+\]\]', '', narration, flags=re.IGNORECASE)
 
-        # Remove <ref>...</ref> footnotes
-        narration = re.sub(r'<ref[^>]*>.*?</ref>', '', narration, flags=re.DOTALL)
-        narration = re.sub(r'<ref[^>]*/?>', '', narration)
+        # ── Handle {{ReadShow|read=...|show=...}} ──
+        # Extract show= for display text, remember read= for TTS
+        tts_narration = narration
+        readshow_pattern = re.compile(
+            r'\{\{ReadShow\|\s*read\s*=\s*([^|}]+).*?\}\}',
+            re.IGNORECASE | re.DOTALL
+        )
+        for rm in readshow_pattern.finditer(tts_narration):
+            read_val = rm.group(1).strip()
+            # Replace the whole template with the read= text for TTS
+            tts_narration = tts_narration.replace(rm.group(0), read_val)
 
-        # Strip {{ReadShow|read=...|show=...}} — keep only the visible text
-        narration = re.sub(r'\{\{ReadShow\|[^}]*show\s*=\s*([^}|]+)[^}]*\}\}',
-                           r'\1', narration, flags=re.IGNORECASE)
+        # For display: keep show= text, strip the rest
+        narration = re.sub(
+            r'\{\{ReadShow\|[^}]*show\s*=\s*([^}|]+)[^}]*\}\}',
+            r'\1', narration, flags=re.IGNORECASE
+        )
         narration = re.sub(r'\{\{ReadShow\|[^}]*\}\}', '', narration, flags=re.IGNORECASE)
 
-        # Strip other templates: {{cite ...}}, {{webarchive}}, {{videowiki}}, etc.
+        # ── Strip other templates ──
         narration = re.sub(r'\{\{[^}]*\}\}', '', narration)
+        tts_narration = re.sub(r'\{\{[^}]*\}\}', '', tts_narration)
 
-        # Strip wiki markup: bold, italic, links
+        # ── Strip wiki markup ──
         narration = re.sub(r"'''?", '', narration)
-        narration = re.sub(r"\[\[([^\]|]+)\|([^\]|]+)\]\]", r'\2', narration)
-        narration = re.sub(r"\[\[([^\]|]+)\]\]", r'\1', narration)
+        tts_narration = re.sub(r"'''?", '', tts_narration)
+        for t in [narration, tts_narration]:
+            t = re.sub(r"\[\[([^\]|]+)\|([^\]|]+)\]\]", r'\2', t)
+            t = re.sub(r"\[\[([^\]|]+)\]\]", r'\1', t)
 
-        # Clean whitespace
+        # ── Replace citation placeholders ──
+        for cit in citations:
+            narration = narration.replace(
+                f"{{{{{cit['ref_id']}}}}}",
+                f"<sup>[{cit['ref_id']}]</sup>"
+            )
+            tts_narration = tts_narration.replace(f"{{{{{cit['ref_id']}}}}}", '')
+
+        # ── Clean whitespace ──
         narration = re.sub(r'\n+', ' ', narration)
         narration = re.sub(r'\s+', ' ', narration).strip()
+        tts_narration = re.sub(r'\n+', ' ', tts_narration)
+        tts_narration = re.sub(r'\s+', ' ', tts_narration).strip()
 
         if not narration:
-            # Fallback: use the section title as narration
             narration = f"About {title}."
+        if not tts_narration:
+            tts_narration = narration
 
         slides.append({
             'title': title,
             'narration': narration,
+            'tts_text': tts_narration,
             'images': images,
+            'citations': citations,
         })
 
     return slides
@@ -286,6 +356,22 @@ class TapestrySlideshowBuilder:
         self.root["items"].append(item)
         return item
 
+    def add_video_item(self, x, y, w, h, source_url, title=""):
+        """Add a video item, returning the item dict."""
+        item = {
+            "id": make_id(),
+            "type": "video",
+            "position": {"x": x, "y": y},
+            "size": {"width": w, "height": h},
+            "title": title or "",
+            "dropShadow": True,
+            "groupId": None,
+            "notes": None,
+            "source": source_url,
+        }
+        self.root["items"].append(item)
+        return item
+
     def add_action_button(self, x, y, w, h, url, label="View on Commons"):
         item = {
             "id": make_id(),
@@ -343,7 +429,7 @@ def generate_narration_audio(text: str, voice: str = TTS_VOICE) -> bytes | None:
         return None
     try:
         path = os.path.join(tempfile.gettempdir(), f"vw_tts_{uuid.uuid4().hex}.mp3")
-        asyncio.run(edge_tts.Communicate(text[:500], voice).save(path))
+        asyncio.run(edge_tts.Communicate(text[:1500], voice).save(path))
         with open(path, "rb") as f:
             data = f.read()
         os.remove(path)
@@ -362,6 +448,7 @@ def convert_videowiki_to_tapestry(
     output: str | None = None,
     generate_audio: bool = False,
     tts_voice: str = TTS_VOICE,
+    text_scale: float = 1.0,
 ):
     """Convert a VideoWiki page into a Tapestry slideshow."""
 
@@ -388,86 +475,123 @@ def convert_videowiki_to_tapestry(
     if len(raw_slides) > max_slides:
         print(f"   Limiting to {max_slides} slides")
 
-    # ── 3. Flatten: one tapestry slide per image, carry the narration ──
-    # A VideoWiki section can have multiple images; we create one tapestry
-    # group per image so the user sees all of them.
-    image_slides = []  # {title, narration, image_name, section_index}
+    # ── 3. Fetch image/video info from Commons per section ──
+    # Each section stays as one Tapestry group (no flattening).
+    # Multi-image sections get a sub-row of images within the group.
+    print(f"\n🔍 Fetching media info from Commons...")
+    total_images = sum(len(s['images']) for s in slides)
+    image_idx = 0
     for slide in slides:
         for img_name in slide['images']:
-            image_slides.append({
-                'title': slide['title'],
-                'narration': slide['narration'],
-                'image_name': img_name,
-            })
+            image_idx += 1
+            is_video = bool(re.search(r'\.(webm|mp4|ogv|ogg)$', img_name, re.I))
+            print(f"   [{image_idx}/{total_images}] {img_name[:60]}...", end="")
+            sys.stdout.flush()
 
-    print(f"   Expanded to {len(image_slides)} image slides ({len(slides)} sections)")
+            if is_video:
+                info = get_video_info_from_commons(img_name)
+            else:
+                info = get_image_info_from_commons(img_name, req_width=image_width)
 
-    # ── 4. Fetch image info from Commons ──
-    print(f"\n🔍 Fetching image info from Commons ({len(image_slides)} images)...")
-    for idx, islide in enumerate(image_slides):
-        print(f"   [{idx+1}/{len(image_slides)}] {islide['image_name'][:60]}...", end="")
-        sys.stdout.flush()
+            if info and info['thumb_url']:
+                img_info = {
+                    'name': img_name,
+                    'thumb_url': info['thumb_url'],
+                    'orig_w': info['orig_w'],
+                    'orig_h': info['orig_h'],
+                    'is_video': is_video,
+                }
+                if 'images_info' not in slide:
+                    slide['images_info'] = []
+                slide['images_info'].append(img_info)
+                print(" ✓")
+            else:
+                print(" ⚠️  skipped")
 
-        info = get_image_info_from_commons(islide['image_name'], req_width=image_width)
-        if info and info['thumb_url']:
-            islide['thumb_url'] = info['thumb_url']
-            islide['orig_w'] = info['orig_w']
-            islide['orig_h'] = info['orig_h']
-            print(" ✓")
-        else:
-            print(" ⚠️  skipped (no URL)")
-            islide['skip'] = True
+    # Remove slides with no usable images
+    slides = [s for s in slides if s.get('images_info')]
 
-    image_slides = [s for s in image_slides if not s.get('skip')]
-
-    if not image_slides:
+    if not slides:
         print("⚠️  No images could be processed.", file=sys.stderr)
         return
 
-    # ── 5. Build the Tapestry layout ──
-    print(f"\n🎨 Building Tapestry slideshow layout ({len(image_slides)} slides)...")
+    # ── 4. Build the Tapestry layout ──
+    print(f"\n🎨 Building Tapestry slideshow layout ({len(slides)} groups)...")
     builder = TapestrySlideshowBuilder(page_title.replace("Wikipedia:VideoWiki/", ""))
 
-    # Create groups: one per image, each with image + narration + Commons button + optional audio
+    # Each section becomes one group with potentially multiple images in a sub-row
     slides_out = []
-    for idx, islide in enumerate(image_slides):
-        disp_w, disp_h = get_display_dimensions(
-            islide['orig_w'], islide['orig_h'], image_width
-        )
-        caption_html = format_narration_html(islide['title'], islide['narration'])
-        text_h = estimate_text_height(caption_html, disp_w)
+    for sdx, slide in enumerate(slides):
+        images_info = slide['images_info']
+        n = len(images_info)
+
+        # Multi-image sections: each image gets an equal share of the cell width
+        if n == 1:
+            sub_width = image_width
+        else:
+            sub_width = max(200, int((image_width - (n - 1) * GAP_X) / n))
 
         group_id = builder.add_group()
-        commons_url = f"https://commons.wikimedia.org/wiki/File:{quote(islide['image_name'])}"
 
-        img_item = builder.add_image_item(0, 0, disp_w, disp_h,
-                                          source_url=islide['thumb_url'])
-        img_item['groupId'] = group_id
+        # Create image/video + Commons button for each media item
+        imgs_data = []
+        for img_info in images_info:
+            disp_w, disp_h = get_display_dimensions(
+                img_info['orig_w'], img_info['orig_h'], sub_width
+            )
+            commons_url = f"https://commons.wikimedia.org/wiki/File:{quote(img_info['name'])}"
 
-        txt_item = builder.add_text_item(0, 0, disp_w, text_h, caption_html)
+            if img_info.get('is_video'):
+                media_item = builder.add_video_item(
+                    0, 0, disp_w, disp_h, source_url=img_info['thumb_url']
+                )
+            else:
+                media_item = builder.add_image_item(
+                    0, 0, disp_w, disp_h, source_url=img_info['thumb_url']
+                )
+            media_item['groupId'] = group_id
+
+            btn_item = builder.add_action_button(
+                0, 0, disp_w, BTN_HEIGHT,
+                url=commons_url,
+                label="🌐  View on Wikimedia Commons"
+            )
+            btn_item['groupId'] = group_id
+
+            imgs_data.append({'item': media_item, 'btn': btn_item, 'w': disp_w, 'h': disp_h})
+
+        # Build caption with citation footnotes (feature 5)
+        caption_html = format_narration_html(slide['title'], slide['narration'])
+        if slide.get('citations'):
+            cit_parts = ['<br><br><span style="font-size:0.8em;color:#888;">']
+            for cit in slide['citations']:
+                safe_text = html.escape(cit['text'])
+                safe_id = html.escape(cit['ref_id'])
+                cit_parts.append(f"<sup>{safe_id}</sup> {safe_text}<br>")
+            cit_parts.append('</span>')
+            caption_html += ''.join(cit_parts)
+
+        text_h = int(estimate_text_height(caption_html, image_width) * text_scale)
+        txt_item = builder.add_text_item(0, 0, image_width, text_h, caption_html)
         txt_item['groupId'] = group_id
 
-        btn_item = builder.add_action_button(0, 0, disp_w, BTN_HEIGHT,
-                                             url=commons_url,
-                                             label="🌐  View on Wikimedia Commons")
-        btn_item['groupId'] = group_id
-
-        # Generate TTS audio for this slide (if enabled)
+        # Generate TTS audio using tts_text (feature 2: uses ReadShow read= values)
         audio_item = None
         if generate_audio:
-            print(f"   🎤 Generating TTS for slide {idx+1}...", end="")
+            tts_input = slide.get('tts_text') or slide['narration']
+            print(f"   🎤 Generating TTS for group {sdx+1}...", end="")
             sys.stdout.flush()
-            audio_data = generate_narration_audio(islide['narration'], voice=tts_voice)
+            audio_data = generate_narration_audio(tts_input, voice=tts_voice)
             if audio_data:
                 audio_uuid = make_id()
-                safe_name = re.sub(r'[^\w\- ]', '_', islide['title'])[:30] or 'narration'
+                safe_name = re.sub(r'[^\w\- ]', '_', slide['title'])[:30] or 'narration'
                 audio_fname = f"items/{audio_uuid} ({safe_name}).mp3"
                 builder._binary_files[audio_fname] = audio_data
                 audio_item = {
                     'id': make_id(),
                     'type': 'audio',
                     'position': {'x': 0, 'y': 0},
-                    'size': {'width': disp_w, 'height': AUDIO_HEIGHT},
+                    'size': {'width': image_width, 'height': AUDIO_HEIGHT},
                     'title': '',
                     'dropShadow': False,
                     'groupId': group_id,
@@ -479,53 +603,82 @@ def convert_videowiki_to_tapestry(
             else:
                 print(" ⚠️  failed")
 
+        # Cell width = total image sub-row width or single image width
+        total_img_w = sum(d['w'] + GAP_X for d in imgs_data) - GAP_X
+        cell_w = max(total_img_w, image_width)
+        max_img_h = max(d['h'] for d in imgs_data)
+
         slides_out.append({
-            'img': img_item,
+            'imgs_data': imgs_data,
             'txt': txt_item,
-            'btn': btn_item,
             'audio': audio_item,
-            'w': disp_w,
-            'h': disp_h,
+            'cell_w': cell_w,
+            'img_h': max_img_h,
             'text_h': text_h,
             'group_id': group_id,
         })
 
-    # Arrange into roughly square rows (same sqrt(N) approach)
-    n = len(slides_out)
-    target_cols = max(1, round(n ** 0.5))
-    rows = [slides_out[i:i + target_cols] for i in range(0, n, target_cols)]
+    # Arrange into roughly square rows
+    n_total = len(slides_out)
+    target_cols = max(1, round(n_total ** 0.5))
+    rows = [slides_out[i:i + target_cols] for i in range(0, n_total, target_cols)]
 
-    max_row_w = max(sum(s['w'] + GAP_X for s in row) - GAP_X for row in rows)
-    cx = MARGIN + max_row_w // 2
+    cx = MARGIN + IMAGE_DISPLAY_WIDTH // 2
     y_cursor = MARGIN
     group_ids = []
 
     for row in rows:
-        row_w = sum(s['w'] + GAP_X for s in row) - GAP_X
+        row_w = sum(s['cell_w'] + GAP_X for s in row) - GAP_X
         x_start = cx - row_w // 2
-        # Cell height: image + gap + text + button gap + button + audio gap + audio
+
+        # Cell height: images + button + text + audio
         row_cell_h = max(
-            s['h'] + GAP_TEXT + s['text_h'] + BTN_GAP + BTN_HEIGHT
+            s['img_h'] + BTN_GAP + BTN_HEIGHT + GAP_TEXT + s['text_h']
             + (AUDIO_GAP + AUDIO_HEIGHT if s['audio'] else 0)
             for s in row
         )
 
         for slide in row:
-            slide['img']['position'] = {'x': x_start, 'y': y_cursor}
-            slide['txt']['position'] = {'x': x_start, 'y': y_cursor + slide['h'] + GAP_TEXT}
-            btn_y = y_cursor + slide['h'] + GAP_TEXT + slide['text_h'] + BTN_GAP
-            slide['btn']['position'] = {'x': x_start, 'y': btn_y}
+            imgs_data = slide['imgs_data']
+            n = len(imgs_data)
+
+            # Center the image sub-row within the cell width
+            sub_row_w = sum(d['w'] + GAP_X for d in imgs_data) - GAP_X
+            img_x = x_start + (slide['cell_w'] - sub_row_w) // 2
+
+            for img_data in imgs_data:
+                img_data['item']['position'] = {'x': img_x, 'y': y_cursor}
+                btn_y = y_cursor + img_data['h'] + BTN_GAP
+                img_data['btn']['position'] = {'x': img_x, 'y': btn_y}
+                img_x += img_data['w'] + GAP_X
+
+            # Narration text below images/buttons
+            txt_y = y_cursor + slide['img_h'] + BTN_GAP + BTN_HEIGHT + GAP_TEXT
+            slide['txt']['position'] = {'x': x_start, 'y': txt_y}
+
+            # Audio below text
             if slide['audio']:
-                slide['audio']['position'] = {
-                    'x': x_start,
-                    'y': btn_y + BTN_HEIGHT + AUDIO_GAP,
-                }
+                audio_y = txt_y + slide['text_h'] + AUDIO_GAP
+                slide['audio']['position'] = {'x': x_start, 'y': audio_y}
+
             group_ids.append(slide['group_id'])
-            x_start += slide['w'] + GAP_X
+            x_start += slide['cell_w'] + GAP_X
 
         y_cursor += row_cell_h + GAP_ROW
 
-    # ── 6. Presentation — focus on each image+caption+button group ──
+    # ── 5. Credit footer (free-floating, not in any group) ──
+    script_url = f"https://en.wikipedia.org/wiki/{quote(page_title)}"
+    credit_html = (
+        f'<p style="text-align:center;font-size:0.85em;color:#888;">'
+        f'Sourced from <a href="{script_url}">{html.escape(page_title)}</a>'
+        f' &middot; Generated by'
+        f' <a href="https://github.com/fuzheado/wikipedia-to-tapestries">wikipedia-to-tapestries</a>'
+        f'</p>'
+    )
+    footer_y = y_cursor + GAP_ROW
+    builder.add_text_item(MARGIN, footer_y, IMAGE_DISPLAY_WIDTH, TEXT_MIN_HEIGHT, credit_html)
+
+    # ── 6. Presentation — focus on each group ──
     pres_step_ids = []
     for gid in group_ids:
         step_id = make_id()
@@ -537,7 +690,7 @@ def convert_videowiki_to_tapestry(
             'groupId': gid,
         })
 
-    # ── 7. Dynamic startView ──
+    # ── 7. Dynamic startView (include footer) ──
     if builder.root['items']:
         xs = [i['position']['x'] for i in builder.root['items']]
         ys = [i['position']['y'] for i in builder.root['items']]
@@ -571,6 +724,7 @@ def main():
             '  python3 videowiki-to-tapestry.py "https://en.wikipedia.org/wiki/Wikipedia:VideoWiki/Birthday_cake"\n'
             '  python3 videowiki-to-tapestry.py "Wikipedia:VideoWiki/A._P._J._Abdul_Kalam" --image-width 500\n'
             '  python3 videowiki-to-tapestry.py "Wikipedia:VideoWiki/Birthday_cake" --tts\n'
+            '  python3 videowiki-to-tapestry.py "Wikipedia:VideoWiki/Birthday_cake" --text-scale 1.5\n'
         )
     )
     parser.add_argument("page", help="VideoWiki page title or full URL")
@@ -582,6 +736,8 @@ def main():
                         help="Generate spoken narration audio for each slide (requires edge-tts)")
     parser.add_argument("--tts-voice", default=TTS_VOICE,
                         help=f"TTS voice (default: {TTS_VOICE})")
+    parser.add_argument("--text-scale", type=float, default=1.0,
+                        help="Scale caption text height by multiplier (e.g. 1.5 for more room)")
     parser.add_argument("--output", "-o", help="Output .zip file path")
 
     args = parser.parse_args()
@@ -609,6 +765,7 @@ def main():
         output=args.output,
         generate_audio=args.tts,
         tts_voice=args.tts_voice,
+        text_scale=args.text_scale,
     )
 
 if __name__ == "__main__":
