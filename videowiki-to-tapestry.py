@@ -654,8 +654,13 @@ def convert_videowiki_to_tapestry(
         target_cols = max(1, round(n_total ** 0.5))  # roughly square
     rows = [slides_out[i:i + target_cols] for i in range(0, n_total, target_cols)]
 
+    # ── Title card (free-floating, above all groups) ──
+    display_title = page_title.replace("Wikipedia:VideoWiki/", "").replace("_", " ")
+    title_html = f'<h1 style="font-size:28px;margin:0;">{html.escape(display_title)}</h1>'
+    builder.add_text_item(MARGIN, MARGIN, IMAGE_DISPLAY_WIDTH, 60, title_html)
+
     cx = MARGIN + IMAGE_DISPLAY_WIDTH // 2
-    y_cursor = MARGIN
+    y_cursor = MARGIN + 80  # leave room for the title card
     group_ids = []
 
     for row in rows:
