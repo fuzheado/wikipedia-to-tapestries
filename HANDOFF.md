@@ -13,17 +13,20 @@ multimedia authoring platform.
 
 ```
 ~/Documents/ai/tapestry-converter/
-├── wikipedia-to-tapestry.py           # Original visual map converter
-├── wikipedia-images-to-tapestry.py    # Image slideshow converter
-├── videowiki-to-tapestry.py           # VideoWiki script slideshow converter
-├── validate-tapestry.py               # Symlink → skill dir validator
-├── README.md                          # Full usage docs
-├── HANDOFF.md                         # This file
-├── IDEAS.md                           # General future project ideas
-├── IDEAS-WIKIPORTRAITS.md            # WikiPortraits-specific ideas
-├── requirements.txt                   # Python deps (requests)
-├── samples/                           # Example .zip outputs
-└── .gitignore                         # *.zip, playwright cache
+├── wikipedia-to-tapestry.py              # Original visual map converter
+├── wikipedia-images-to-tapestry.py       # Image slideshow converter
+├── videowiki-to-tapestry.py              # VideoWiki script slideshow converter
+├── wikipedia-citation-graph.py           # ⭐ Citation graph converter (new)
+├── validate-tapestry.py                  # Symlink → skill dir validator
+├── PRD-CITATION-GRAPH.md                # Citation graph feature spec
+├── README.md                             # Full usage docs
+├── HANDOFF.md                            # This file
+├── IDEAS.md                              # General future project ideas
+├── IDEAS-WIKIPORTRAITS.md               # WikiPortraits-specific ideas
+├── requirements.txt                      # Python deps (requests)
+├── samples/                              # Example .zip outputs
+├── .screenshot_cache/                    # Playwright screenshot cache
+└── .gitignore                            # *.zip, playwright cache
 ```
 
 The companion skill ([github.com/fuzheado/tapestries-skill](https://github.com/fuzheado/tapestries-skill))
@@ -67,6 +70,34 @@ narration text, TTS audio, and clickable references. Latest and most feature-ric
 - Auto-generated title card and credit footer
 - Configurable button color, text scale, image width
 
+### 4. Citation Graph (`wikipedia-citation-graph.py`)
+
+Newest converter. Renders any Wikipedia article as a **star graph**:
+a full-page screenshot of the article in the center, with all its cited
+references flanking it on both sides, connected by arrows from the exact
+citation positions in the article.
+
+**Architecture:**
+1. Fetch rendered HTML via `action=parse&prop=text`
+2. Parse references from `<ol class="references">` (HTML entity `&#95;` for underscores)
+3. Optional: cross-verify with `mwparserfromhell` (wikitext parsing)
+4. Capture full-page screenshot via Playwright CLI (`fullPage: true`)
+5. Measure citation positions via `document.querySelectorAll("sup.reference a")`
+   with `getBoundingClientRect().top` — accurate to the pixel
+6. Detect clusters of refs at similar Y positions and fan them outward
+7. Build v7 Tapestry with article as `image` item, refs as appropriate types
+
+**Key features:**
+- Three layout modes: positioned (both sides), ring, grid
+- Full-page article screenshot — no scrolling needed on the canvas
+- References at their approximate article positions (Playwright-measured)
+- Reference type detection: webpage, PDF, book/ISBN, DOI, PubMed, arXiv, text
+- Optional URL probing (`--probe`) for dead link detection
+- Playwright screenshots as article + source page thumbnails (`--screenshots`)
+- Numbered circle badges on each reference
+- Action buttons to open URLs externally
+- Screenshot cache (`.screenshot_cache/`) — 2nd run is instant
+
 ## Key Design Decisions
 
 ### Images use URLs, not embedded files
@@ -99,6 +130,27 @@ uses the script's narration text — already written to be spoken alongside visu
 | Configurable button color | ✅ | `--button-color` hex option |
 | Text scale | ✅ | `--text-scale` for caption height |
 
+## Feature Checklist — Citation Graph Converter
+
+| Feature | Status | Notes |
+|---|---|---|
+| Rendered HTML reference parsing | ✅ | `<ol class="references">` with `&#95;` entity support |
+| mwparserfromhell cross-verification | ✅ | Optional, auto-detected |
+| Full-page article screenshot | ✅ | Playwright `fullPage: true`, cached |
+| Playwright-measured citation positions | ✅ | `getBoundingClientRect().top` on `<sup>` elements |
+| Cluster detection + fan-out | ✅ | Refs within 150px get staggered horizontally |
+| Both-sides layout (default `u`) | ✅ | Alternating left/right, arrows from article edges |
+| Ring layout | ✅ | Full ellipse, double ring for >30 refs |
+| Grid layout | ✅ | Centered grid below article |
+| Reference type detection | ✅ | webpage, PDF, book/ISBN, DOI, PubMed, arXiv, text |
+| URL probing | ✅ | `--probe` flag, HEAD requests to detect dead links |
+| Source page screenshots | ✅ | `--screenshots`, thumbnail for each reference |
+| Numbered badges | ✅ | Colored circle with citation number |
+| Action buttons | ✅ | "Open ↗" on each URL-bearing reference |
+| Article height control | ✅ | `--max-height`, `--height-ratio` |
+| Overflow summary card | ✅ | When refs exceed `--max-refs` |
+| Screenshot cache | ✅ | `.screenshot_cache/`, `--no-cache`, `--clear-cache` |
+
 ## Known Limitations
 
 1. **No built-in auto-play for audio** — TTS audio plays manually; the viewer
@@ -109,6 +161,10 @@ uses the script's narration text — already written to be spoken alongside visu
    resolve shortDOIs or handle all citation format variants.
 4. **No batch mode** — Each article converted individually; no multi-article
    or category-level batch processing.
+5. **X-Frame-Orictions on source pages** — Some sites block iframe embedding;
+   the webpage embed shows blank. Action button still opens in new tab.
+6. **Mobile screenshot width** — Article screenshot uses mobile view (~450px
+   content width within 800px viewport). Desktop rendering not supported yet.
 
 ## Future Directions
 
@@ -120,6 +176,8 @@ Key areas:
 - WikiPortraits integration (portrait galleries, career evolution, event maps)
 - Wikidata enrichment for images (subject QID lookup)
 - HTML/PDF export option alongside Tapestry zip
+- Citation clustering by section — group refs by which section cites them
+- DOI → CrossRef metadata enrichment (author, year, journal)
 
 ## Who Built This
 

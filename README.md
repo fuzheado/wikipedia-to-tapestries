@@ -1,12 +1,16 @@
-# Wikipedia → Tapestry Visual Map Converter
+# Wikipedia → Tapestry Converters
 
-Converts any Wikipedia article into a `.zip` file for import into
+Convert Wikipedia articles into `.zip` files for import into
 [Tapestries](https://tapestries.media) — an infinite canvas multimedia authoring platform.
 
-The output is a visual map: **image gallery** at the top (center-aligned rows),
-the **article itself** as an embedded webpage in the center, and **linked articles**
-from the lead section below in either a grid or semicircle layout, connected with arrows.
-Includes a guided presentation tour through all items and a dynamic start view.
+Four converters are included, each serving a different use case:
+
+| Script | What it does |
+|---|---|
+| `wikipedia-to-tapestry.py` | **Visual map** — image gallery, article embed, linked articles in grid/semicircle |
+| `wikipedia-images-to-tapestry.py` | **Image slideshow** — article images as a navigable photo mosaic |
+| `videowiki-to-tapestry.py` | **VideoWiki slideshow** — narrated scripts with TTS audio |
+| [`wikipedia-citation-graph.py`](#wikipedia--citation-graph) | **Citation graph** — article as full-page screenshot with all references flanking it |
 
 > **🧪 Instant testing:** Use **[viewer.tapestries.media](https://viewer.tapestries.media)** to preview any `.zip` file
 > immediately — **no sign-in, no upload, no account needed.** Just drag the file onto the page.
@@ -362,6 +366,163 @@ python3 videowiki-to-tapestry.py "Wikipedia:VideoWiki/A._P._J._Abdul_Kalam" \
 
 ---
 
+## Wikipedia → Citation Graph
+
+Renders any Wikipedia article as a **star graph** on the infinite canvas:
+the full article as a full-page screenshot image in the center, flanked on
+both sides by its cited references, each rendered according to its type
+(webpage embed, PDF viewer, book cover, DOI resolver, or text card), with
+arrows connecting the citation positions in the article to each source.
+
+```bash
+python3 wikipedia-citation-graph.py "Article Title" [options]
+python3 wikipedia-citation-graph.py "https://en.wikipedia.org/wiki/Article_Title"
+```
+
+### Quick Start
+
+```bash
+# Small article, default U-shape layout (refs flank article on both sides)
+python3 wikipedia-citation-graph.py "Seven dirty words" -o seven-words-cites.zip
+
+# With source page screenshots as thumbnails
+python3 wikipedia-citation-graph.py "Ada Lovelace" --screenshots --max-refs 30
+
+# Medium article with full ring layout
+python3 wikipedia-citation-graph.py "Supreme Court of the United States" \
+    --layout ring --max-refs 80 -o scotus-cites.zip
+
+# Validate and preview
+python3 validate-tapestry.py seven-words-cites.zip
+# → https://viewer.tapestries.media
+```
+
+### Options
+
+| Flag | Default | Description |
+|---|---|---|
+| `--layout MODE` | `u` | Layout: `u` (positioned, both sides), `ring` (full ring), `grid` (grid below) |
+| `--max-refs N` | 50 | Maximum references to include (0 = all) |
+| `--max-height N` | none | Cap article image height in pixels |
+| `--height-ratio N` | 1.0 | Scale article height by factor |
+| `--article-width N` | 800 | Article screenshot width in pixels |
+| `--ref-width N` | 450 | Reference embed width in pixels |
+| `--screenshots` | off | Capture Playwright screenshots as thumbnails |
+| `--probe` | off | Probe URLs with HEAD request to detect dead links |
+| `--no-cache` | off | Bypass screenshot cache |
+| `--clear-cache` | — | Delete all cached screenshots and exit |
+| `--output`, `-o` | auto | Output `.zip` file path |
+
+### What It Produces
+
+The converter generates a self-contained v7 Tapestry zip with:
+
+```
+              ┌─────────────────────────┐
+   ┌── Ref 1 ─┤  ARTICLE FULL SCREEN    ├── Ref 2 ──┐
+   │          │  (800×6777px image)     │           │
+   │ ┌──Ref 3─┤  no scrolling needed    ├── Ref 4──┐│
+   │ │        │                         │         ││
+   │ │┌─Ref 5─┤                         ├─Ref 6──┐││
+   │ ││       │                         │        │││
+   └─┘└───────┘                         └────────┘┘
+```
+
+- **Article:** A full-page screenshot (800px wide, full height) — the entire
+  article visible at once, no scrolling. Captured via Playwright CLI with
+  `fullPage: true`.
+- **References:** Up to `--max-refs` (default 50) placed at their approximate
+  citation position in the article. Clustered refs (multiple citations close
+  together) fan outward horizontally with vertical stagger.
+- **Both sides:** Refs alternate left and right of the article for visual
+  balance. Arrows originate from the correct article edge at the citation's
+  Y position.
+- **Type detection:** Each reference is classified and rendered appropriately:
+  - **Webpage URL** → `webpage` embed (live iframe)
+  - **PDF** → `pdf` embed (embedded PDF viewer)
+  - **Book (ISBN)** → Google Books embed
+  - **DOI / PubMed / arXiv** → Resolved webpage embed
+  - **Bare citation** → Text card with citation text
+  - **Dead link** → Red placeholder card (with `--probe`)
+- **Numbered badges:** Each reference has a colored circle badge showing its
+  citation number.
+- **Action buttons:** "Open ↗" button on each URL-bearing reference.
+- **Presentation:** Guided tour through article → each reference in order.
+
+### Citation Position Mapping
+
+The converter uses **Playwright's DOM API** to measure exact citation positions:
+
+```javascript
+// Each citation <sup> element's getBoundingClientRect().top is recorded
+const anchors = document.querySelectorAll("sup.reference a");
+for (const a of anchors) {
+  const rect = a.getBoundingClientRect();
+  positions[baseRefName] = Math.round(rect.top);
+}
+```
+
+This is far more accurate than HTML character-offset heuristics — it accounts
+for images, tables, infoboxes, and variable line heights in the rendered page.
+
+### Reference Verification
+
+If [`mwparserfromhell`](https://github.com/earwig/mwparserfromhell) is installed,
+the converter cross-verifies reference names from the raw wikitext against the
+HTML-extracted references for additional accuracy.
+
+```bash
+pip install mwparserfromhell  # optional, but recommended
+```
+
+### Screenshot Cache
+
+All screenshots (article + source pages) are cached to `.screenshot_cache/`
+in the project directory. Cached screenshots are reused on subsequent runs:
+
+```bash
+# First run — captures everything (~5s article, ~30s with --screenshots)
+python3 wikipedia-citation-graph.py "Ada Lovelace" --screenshots
+
+# Second run — instant from cache (~3s)
+python3 wikipedia-citation-graph.py "Ada Lovelace" --screenshots
+
+# Clear cache
+python3 wikipedia-citation-graph.py --clear-cache
+
+# Bypass cache for one run
+python3 wikipedia-citation-graph.py "Ada Lovelace" --no-cache
+```
+
+### Layout Modes
+
+| Mode | `--layout` | Description |
+|---|---|---|
+| **Positioned** (default) | `u` | Refs flank article on both sides, placed at citation Y positions |
+| **Ring** | `ring` | Refs encircle the article in an ellipse (double ring for >30 refs) |
+| **Grid below** | `grid` | Refs arranged in a centered grid below the article |
+
+### Examples
+
+```bash
+# All 16 refs from Seven dirty words with source screenshots
+python3 wikipedia-citation-graph.py "Seven dirty words" --screenshots \
+    -o samples/Seven_dirty_words_citation_graph.zip
+
+# Alan Greenspan, cap at 40 refs, 8000px article height
+python3 wikipedia-citation-graph.py "Alan Greenspan" --max-refs 40 \
+    --max-height 8000 -o greenspan-cites.zip
+
+# Supreme Court in ring layout with 80 refs
+python3 wikipedia-citation-graph.py "Supreme Court of the United States" \
+    --layout ring --max-refs 80 --max-height 10000 -o scotus-cites.zip
+
+# Probe dead links, include all refs
+python3 wikipedia-citation-graph.py "Ada Lovelace" --max-refs 0 --probe
+```
+
+---
+
 ## File Format
 
 The output conforms to the **v7 Tapestry export format** as deployed on
@@ -396,7 +557,13 @@ python3 validate-tapestry.py -v file.zip
 - Python 3.10+
 - `requests` library (see `requirements.txt`)
 
-**Playwright CLI** (only for `--screenshots`):
+**Optional Python:**
+- `mwparserfromhell` — cross-verifies reference names in the citation graph converter
+  (`pip install mwparserfromhell`)
+- `edge-tts` — TTS audio narration for the VideoWiki converter
+  (`pip install edge-tts`)
+
+**Playwright CLI** (required for `--screenshots` and the citation graph converter):
 - Node.js 18+
 - `npm install -g @playwright/cli@latest`
 - `playwright-cli install` (downloads browser binaries)
